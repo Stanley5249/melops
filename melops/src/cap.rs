@@ -11,7 +11,7 @@ use melops_asr::chunk::ChunkConfig;
 use melops_asr::models::tdt::core::TdtModel;
 use melops_asr::traits::AsrModel;
 #[allow(unused_imports)]
-use ort::execution_providers::*;
+use ort::ep::*;
 use ort::session::Session;
 use ort::session::builder::SessionBuilder;
 use srtlib::Subtitle;
