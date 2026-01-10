@@ -765,10 +765,10 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/e8/2d/d2a548598be01649e2d46231d151a6c56d10b964d94043a335ae56ea2d92/flatbuffers-25.12.19-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/f0/0f/310fb31e39e2d734ccaa2c0fb981ee41f7bd5056ce9bc29b2248bd569169/humanfriendly-10.0-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/99/98/9d4ad53b0e9ef901c2ef1d550d2136f5ac42d3fd2988390a6def32e23e48/numpy-2.4.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
-      - pypi: https://files.pythonhosted.org/packages/a6/f3/8e4332aad38b22402b7671fedea60e930639b7f265a99f61f31dd8f8fce7/onnxruntime_openvino-1.22.0-cp313-cp313-manylinux_2_28_x86_64.whl
+      - pypi: https://files.pythonhosted.org/packages/ba/87/d341e519956273b39d8d47969dd1eaa1af740615394fe67d06f1efa68773/numpy-2.4.1-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+      - pypi: https://files.pythonhosted.org/packages/ce/48/e42f618a8ec5fcf825fed4fdc8125f7105256cc6020b84567ecb88d5e2b7/onnxruntime_openvino-1.23.0-cp313-cp313-manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/20/12/38679034af332785aac8774540895e234f4d07f7545804097de4b666afd8/packaging-25.0-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/56/13/333b8f421738f149d4fe5e49553bc2a2ab75235486259f689b4b91f96cec/protobuf-6.33.2-cp39-abi3-manylinux2014_x86_64.whl
+      - pypi: https://files.pythonhosted.org/packages/38/8c/6522b8e543ece46f645911c3cebe361d8460134c0fee02ddcf70ebf32999/protobuf-6.33.3-cp39-abi3-manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl
       win-64:
       - conda: https://prefix.dev/conda-forge/win-64/aom-3.9.1-he0c23c2_0.conda
@@ -862,10 +862,10 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/e8/2d/d2a548598be01649e2d46231d151a6c56d10b964d94043a335ae56ea2d92/flatbuffers-25.12.19-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/f0/0f/310fb31e39e2d734ccaa2c0fb981ee41f7bd5056ce9bc29b2248bd569169/humanfriendly-10.0-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/4f/f1/719010ff8061da6e8a26e1980cf090412d4f5f8060b31f0c45d77dd67a01/numpy-2.4.0-cp313-cp313-win_amd64.whl
-      - pypi: https://files.pythonhosted.org/packages/c3/0c/b7ac06f634403354225a5fc7a4b46cc4eb7fdd8a03dea3c77efd95e3c3dd/onnxruntime_openvino-1.22.0-cp313-cp313-win_amd64.whl
+      - pypi: https://files.pythonhosted.org/packages/da/a6/cf32198b0b6e18d4fbfa9a21a992a7fca535b9bb2b0cdd217d4a3445b5ca/numpy-2.4.1-cp313-cp313-win_amd64.whl
+      - pypi: https://files.pythonhosted.org/packages/4a/f9/a531dc497dc113dc14df9a9de5aacb1676cadebc3ec6cc7cd3ca65cb3db0/onnxruntime_openvino-1.23.0-cp313-cp313-win_amd64.whl
       - pypi: https://files.pythonhosted.org/packages/20/12/38679034af332785aac8774540895e234f4d07f7545804097de4b666afd8/packaging-25.0-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/64/20/4d50191997e917ae13ad0a235c8b42d8c1ab9c3e6fd455ca16d416944355/protobuf-6.33.2-cp310-abi3-win_amd64.whl
+      - pypi: https://files.pythonhosted.org/packages/23/07/1f1300fe7d204fd7aaabd9a0aafd54e6358de833b783f5bd161614e8e1e4/protobuf-6.33.3-cp310-abi3-win_amd64.whl
       - pypi: https://files.pythonhosted.org/packages/5a/dc/491b7661614ab97483abf2056be1deee4dc2490ecbf7bff9ab5cdbac86e1/pyreadline3-3.5.4-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl
 packages:
@@ -5936,15 +5936,15 @@ packages:
   version: 1.26.4
   sha256: 08beddf13648eb95f8d867350f6a018a4be2e5ad54c8d8caed89ebca558b2818
   requires_python: '>=3.9'
-- pypi: https://files.pythonhosted.org/packages/4f/f1/719010ff8061da6e8a26e1980cf090412d4f5f8060b31f0c45d77dd67a01/numpy-2.4.0-cp313-cp313-win_amd64.whl
+- pypi: https://files.pythonhosted.org/packages/ba/87/d341e519956273b39d8d47969dd1eaa1af740615394fe67d06f1efa68773/numpy-2.4.1-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
   name: numpy
-  version: 2.4.0
-  sha256: a899699294f28f7be8992853c0c60741f16ff199205e2e6cdca155762cbaa59d
+  version: 2.4.1
+  sha256: d3e3087f53e2b4428766b54932644d148613c5a595150533ae7f00dab2f319a8
   requires_python: '>=3.11'
-- pypi: https://files.pythonhosted.org/packages/99/98/9d4ad53b0e9ef901c2ef1d550d2136f5ac42d3fd2988390a6def32e23e48/numpy-2.4.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+- pypi: https://files.pythonhosted.org/packages/da/a6/cf32198b0b6e18d4fbfa9a21a992a7fca535b9bb2b0cdd217d4a3445b5ca/numpy-2.4.1-cp313-cp313-win_amd64.whl
   name: numpy
-  version: 2.4.0
-  sha256: 8cfa5f29a695cb7438965e6c3e8d06e0416060cf0d709c1b1c1653a939bf5c2a
+  version: 2.4.1
+  sha256: 92a0e65272fd60bfa0d9278e0484c2f52fe03b97aedc02b357f33fe752c52ffb
   requires_python: '>=3.11'
 - pypi: https://files.pythonhosted.org/packages/ee/c4/ea91554c4fcbff66057f667690101d7a4b965605741350ac661b03fa6c46/nv_one_logger_core-2.3.1-py3-none-any.whl
   name: nv-one-logger-core
@@ -6080,10 +6080,10 @@ packages:
   - typing-extensions>=4.10
   - ml-dtypes>=0.5.0
   requires_python: '>=3.9'
-- pypi: https://files.pythonhosted.org/packages/a6/f3/8e4332aad38b22402b7671fedea60e930639b7f265a99f61f31dd8f8fce7/onnxruntime_openvino-1.22.0-cp313-cp313-manylinux_2_28_x86_64.whl
+- pypi: https://files.pythonhosted.org/packages/4a/f9/a531dc497dc113dc14df9a9de5aacb1676cadebc3ec6cc7cd3ca65cb3db0/onnxruntime_openvino-1.23.0-cp313-cp313-win_amd64.whl
   name: onnxruntime-openvino
-  version: 1.22.0
-  sha256: a9879cfeb777a74b157383650aaf8762854a564f974ecdad55c7aa5962c7c534
+  version: 1.23.0
+  sha256: 0ebbf70929de4ce269371cb255536bbedef588932d744da0b40e66c38a620f35
   requires_dist:
   - coloredlogs
   - flatbuffers
@@ -6092,10 +6092,10 @@ packages:
   - protobuf
   - sympy
   requires_python: '>=3.10'
-- pypi: https://files.pythonhosted.org/packages/c3/0c/b7ac06f634403354225a5fc7a4b46cc4eb7fdd8a03dea3c77efd95e3c3dd/onnxruntime_openvino-1.22.0-cp313-cp313-win_amd64.whl
+- pypi: https://files.pythonhosted.org/packages/ce/48/e42f618a8ec5fcf825fed4fdc8125f7105256cc6020b84567ecb88d5e2b7/onnxruntime_openvino-1.23.0-cp313-cp313-manylinux_2_28_x86_64.whl
   name: onnxruntime-openvino
-  version: 1.22.0
-  sha256: 329ddda0093cb2702dc5774075d3f5520e7cb9b478a420ec7183ee45426d7027
+  version: 1.23.0
+  sha256: 2e93b9a8323e196b7433866054a59260f2206ab6fb0e7223dda91da71f1db8c5
   requires_dist:
   - coloredlogs
   - flatbuffers
@@ -6738,15 +6738,15 @@ packages:
   version: 5.29.5
   sha256: 63848923da3325e1bf7e9003d680ce6e14b07e55d0473253a690c3a8b8fd6e61
   requires_python: '>=3.8'
-- pypi: https://files.pythonhosted.org/packages/56/13/333b8f421738f149d4fe5e49553bc2a2ab75235486259f689b4b91f96cec/protobuf-6.33.2-cp39-abi3-manylinux2014_x86_64.whl
+- pypi: https://files.pythonhosted.org/packages/23/07/1f1300fe7d204fd7aaabd9a0aafd54e6358de833b783f5bd161614e8e1e4/protobuf-6.33.3-cp310-abi3-win_amd64.whl
   name: protobuf
-  version: 6.33.2
-  sha256: 1f8017c48c07ec5859106533b682260ba3d7c5567b1ca1f24297ce03384d1b4f
+  version: 6.33.3
+  sha256: 1fd18f030ae9df97712fbbb0849b6e54c63e3edd9b88d8c3bb4771f84d8db7a4
   requires_python: '>=3.9'
-- pypi: https://files.pythonhosted.org/packages/64/20/4d50191997e917ae13ad0a235c8b42d8c1ab9c3e6fd455ca16d416944355/protobuf-6.33.2-cp310-abi3-win_amd64.whl
+- pypi: https://files.pythonhosted.org/packages/38/8c/6522b8e543ece46f645911c3cebe361d8460134c0fee02ddcf70ebf32999/protobuf-6.33.3-cp39-abi3-manylinux2014_x86_64.whl
   name: protobuf
-  version: 6.33.2
-  sha256: fc2a0e8b05b180e5fc0dd1559fe8ebdae21a27e81ac77728fb6c42b12c7419b4
+  version: 6.33.3
+  sha256: 6fa9b5f4baa12257542273e5e6f3c3d3867b30bc2770c14ad9ac8315264bf986
   requires_python: '>=3.9'
 - pypi: https://files.pythonhosted.org/packages/29/f8/40e01c350ad9a2b3cb4e6adbcc8a83b17ee50dd5792102b6142385937db5/psutil-7.2.1-cp36-abi3-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl
   name: psutil

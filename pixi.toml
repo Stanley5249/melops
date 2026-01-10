@@ -44,7 +44,7 @@ libopenvino-intel-gpu-plugin = ">=2025.4.0,<2025.5.0"
 # libopenvino-intel-npu-plugin
 
 [feature.openvino.pypi-dependencies]
-onnxruntime-openvino = ">=1.22.0,<1.23.0"
+onnxruntime-openvino = ">=1.23.0,<1.24.0"
 
 
 [feature.export.tasks]
