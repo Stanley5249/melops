@@ -109,6 +109,10 @@ impl TdtModel {
         let blank_id = self.detokenizer.vocab_size();
         let max_symbols_per_step = 10;
 
+        // IoBinding reuses pre-allocated output tensors. Direct assignment
+        // would alias state with output_states, causing unintended updates
+        // even when blank tokens should skip state changes. Use copy_into
+        // for explicit control over when state propagates.
         let mut state = DecoderState {
             target: Tensor::from_array(([1, 1], vec![blank_id as i32]))?,
             target_length: Tensor::from_array(([1], vec![1_i32]))?,
@@ -241,15 +245,28 @@ impl TdtModel {
             let skip = decoded.duration;
 
             if decoded.token_id != blank_id {
-                state.states_1 = decoder_outputs.output_states_1;
-                state.states_2 = decoder_outputs.output_states_2;
+                // With IoBinding, state and output_states alias the same memory.
+                // Direct assignment (commented below) only updates Rust references
+                // on first iteration. After that, both point to same tensor and
+                // ONNX Runtime always writes new states to bound outputs, bypassing
+                // this conditional. Use copy_into for explicit control: states only
+                // update when we want them to (non-blank tokens).
+
+                // state.states_1 = decoder_outputs.output_states_1;
+                // state.states_2 = decoder_outputs.output_states_2;
+
+                decoder_outputs
+                    .output_states_1
+                    .copy_into(&mut state.states_1)?;
+                decoder_outputs
+                    .output_states_2
+                    .copy_into(&mut state.states_2)?;
 
                 tokens.push(TokenDuration {
                     token_id: decoded.token_id,
                     frame_index,
                     duration: skip,
                 });
-
                 state.target[[0, 0]] = decoded.token_id as i32;
             }
 
