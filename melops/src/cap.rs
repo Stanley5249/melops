@@ -141,8 +141,8 @@ fn caption_from_wav_file(
 ///
 /// Ensure required hardware, drivers, and runtime dependencies are installed for the
 /// desired provider.
-fn build_session() -> Result<SessionBuilder> {
-    Ok(Session::builder()?.with_execution_providers([
+fn build_session() -> ort::Result<SessionBuilder> {
+    let eps = [
         #[cfg(feature = "cuda")]
         CUDAExecutionProvider::default().build(),
         #[cfg(feature = "tensorrt")]
@@ -157,7 +157,9 @@ fn build_session() -> Result<SessionBuilder> {
         DirectMLExecutionProvider::default().build(),
         #[cfg(feature = "coreml")]
         CoreMLExecutionProvider::default().build(),
-    ])?)
+    ];
+    let builder = Session::builder()?.with_execution_providers(eps)?;
+    Ok(builder)
 }
 
 /// Format seconds as a string with two decimal places.

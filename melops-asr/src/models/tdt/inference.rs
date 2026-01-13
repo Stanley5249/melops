@@ -6,6 +6,7 @@ use crate::models::tdt::detokenizer::TokenDuration;
 use ndarray::prelude::*;
 use ndarray_stats::QuantileExt;
 use ort::io_binding::IoBinding;
+use ort::session::RunOptions;
 use ort::value::Tensor;
 use std::sync::OnceLock;
 
@@ -68,14 +69,9 @@ impl TdtModel {
 
         DEBUG_ALLOCATOR.get_or_init(|| {
             tracing::debug!(
-                allocator = ?allocator,
-                memory_info = ?memory_info,
                 allocation_device = ?memory_info.allocation_device(),
-                allocator_type = ?memory_info.allocator_type(),
                 device_id = ?memory_info.device_id(),
-                device_type = ?memory_info.device_type(),
-                is_cpu_accessible = ?memory_info.is_cpu_accessible(),
-                memory_type = ?memory_info.memory_type(),
+                "encoder allocator"
             );
         });
 
@@ -84,7 +80,9 @@ impl TdtModel {
         let encoded_lengths = Tensor::<i64>::new(allocator, [1_usize])?;
         binding.bind_output("encoded_lengths", encoded_lengths)?;
 
-        let mut outputs = self.encoder.run_binding(&binding)?;
+        let options = RunOptions::new()?.with_tag("encoder")?;
+
+        let mut outputs = self.encoder.run_binding_with_options(&binding, &options)?;
 
         let encoder_outputs = outputs
             .remove("outputs")
@@ -184,7 +182,11 @@ impl TdtModel {
         binding.bind_input("input_states_1", &state.states_1)?;
         binding.bind_input("input_states_2", &state.states_2)?;
 
-        let mut session_outputs = self.decoder_joint.run_binding(binding)?;
+        let options = RunOptions::new()?.with_tag("decoder_joint")?;
+
+        let mut session_outputs = self
+            .decoder_joint
+            .run_binding_with_options(binding, &options)?;
 
         let outputs = session_outputs
             .remove("outputs")
