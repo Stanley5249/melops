@@ -23,8 +23,8 @@ impl AsrModel for TdtModel {
     /// Run TDT inference on audio, returning token-duration sequence.
     fn forward(&mut self, audio: &[f32]) -> Result<Vec<Self::Output>> {
         let features = self.mel.apply(audio);
-        let (encoder_output, encoded_length) = self.encode(features)?;
-        self.greedy_decode(encoder_output, encoded_length as usize)
+        let encoder_output = self.encode(features)?;
+        self.greedy_decode(encoder_output)
     }
 
     /// Convert token-duration sequence to text segments with timestamps.

@@ -63,9 +63,9 @@ pub enum AudioError {
 /// Model inference errors (ONNX, ndarray operations).
 #[derive(Debug, Error)]
 pub enum ModelError {
-    /// Missing expected output tensor
-    #[error("missing model output: {name}")]
-    MissingOutput { name: String },
+    /// Missing expected session output
+    #[error("missing ort output {key:?}")]
+    MissingOutput { key: String },
 
     /// Duration index out of bounds
     #[error("duration index {index} out of bounds (max {max})")]
@@ -86,6 +86,12 @@ pub enum ModelError {
     /// ndarray-stats quantile error
     #[error(transparent)]
     Quantile(#[from] QuantileError),
+}
+
+impl ModelError {
+    pub fn missing_output(key: impl Into<String>) -> Self {
+        Self::MissingOutput { key: key.into() }
+    }
 }
 
 /// Result type alias for melops-asr operations.

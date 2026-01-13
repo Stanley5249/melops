@@ -22,7 +22,7 @@ melops-asr.workspace = true
 melops-dl.workspace = true
 
 # Re-export ort for direct provider configuration
-ort = { workspace = true, features = ["download-binaries", "copy-dylibs"] }
+ort = { workspace = true, features = ["download-binaries",  "tls-native", "copy-dylibs"] }
 
 # Subtitle
 srtlib = "0.2.0"
@@ -45,8 +45,7 @@ color-eyre = "0.6.5"
 cuda = ["ort/cuda"]
 tensorrt = ["ort/tensorrt"]
 # TensorRT RTX
-# Might break in future, change to "nvrtx" when available
-nv = ["ort/nv"]
+nvrtx = ["ort/nvrtx"]
 # Intel
 openvino = ["ort/openvino"]
 onednn = ["ort/onednn"]
