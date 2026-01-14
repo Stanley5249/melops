@@ -1,13 +1,16 @@
 //! Core traits for ASR pipeline components.
 
 use crate::chunk::ChunkConfig;
+use crate::error::Error;
 use crate::error::Result;
 use crate::types::Segment;
+use futures::stream::{self, StreamExt, TryStreamExt};
 
 /// ASR model that performs inference on preprocessed features.
 ///
 /// This trait abstracts over different model architectures (TDT, CDC, EOU, Whisper)
 /// while providing a uniform interface for the pipeline.
+#[allow(async_fn_in_trait)]
 pub trait AsrModel {
     /// Output type from model inference.
     ///
@@ -46,9 +49,7 @@ pub trait AsrModel {
     ///
     /// Returns `Vec<Self::Output>` where each item represents a decoded unit
     /// (e.g., token with timing information).
-    ///
-    /// Note: Takes `&mut self` because ONNX Runtime's Session::run requires it.
-    fn forward(&mut self, audio: &[f32]) -> Result<Vec<Self::Output>>;
+    async fn forward(&self, audio: &[f32]) -> Result<Vec<Self::Output>>;
 
     /// Convert a sequence of model outputs to text segments with timestamps.
     fn to_segments(&self, output: &[Self::Output]) -> Result<Vec<Segment>>;
@@ -63,16 +64,16 @@ pub trait AsrModel {
     fn merge_chunks(chunks: impl IntoIterator<Item = Vec<Self::Output>>) -> Vec<Self::Output>;
 
     /// Transcribe audio samples, returning segments.
-    fn transcribe(&mut self, audio: &[f32]) -> Result<Vec<Segment>> {
-        let output = self.forward(audio)?;
+    async fn transcribe(&self, audio: &[f32]) -> Result<Vec<Segment>> {
+        let output = self.forward(audio).await?;
         self.to_segments(&output)
     }
 
     /// Transcribe audio with automatic chunking, returning merged segments.
-    fn transcribe_chunked(&mut self, audio: &[f32], config: ChunkConfig) -> Result<Vec<Segment>> {
-        let outputs = config
+    async fn transcribe_chunked(&self, audio: &[f32], config: ChunkConfig) -> Result<Vec<Segment>> {
+        let chunks = config
             .chunk_audio(audio.len(), self.sample_rate())
-            .map(|range| {
+            .map(async |range| {
                 let start = self.samples_to_secs(range.start);
                 let end = self.samples_to_secs(range.end);
                 tracing::debug!(
@@ -85,22 +86,23 @@ pub trait AsrModel {
 
                 let chunk = &audio[range];
 
-                let mut output = self.forward(chunk)?;
+                let mut output = self.forward(chunk).await?;
 
                 Self::offset_outputs(&mut output, frames);
 
-                Ok(output)
-            })
-            .collect::<Result<Vec<_>>>()?;
+                Ok::<_, Error>(output)
+            });
 
-        let merged_output = Self::merge_chunks(outputs);
+        let chunks: Vec<_> = stream::iter(chunks).buffered(2).try_collect().await?;
+
+        let merged_output = Self::merge_chunks(chunks);
         self.to_segments(&merged_output)
     }
 
     /// Transcribe audio from an iterator stream, returning merged segments.
     #[allow(unused_variables)]
-    fn transcribe_stream(
-        &mut self,
+    async fn transcribe_stream(
+        &self,
         audio: impl Iterator<Item = f32>,
         config: ChunkConfig,
     ) -> Result<Vec<Segment>> {

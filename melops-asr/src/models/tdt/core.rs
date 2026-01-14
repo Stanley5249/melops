@@ -4,8 +4,10 @@ use crate::audio::MelSpectrogram;
 use crate::models::tdt::detokenizer::TdtDetokenizer;
 use crate::types::ModelRepo;
 use eyre::{Result, WrapErr, eyre};
+use futures::lock::Mutex;
 use ort::session::Session;
 use ort::session::builder::SessionBuilder;
+use std::sync::Arc;
 use tokenizers::Tokenizer;
 
 /// TDT model for ASR inference.
@@ -15,8 +17,8 @@ use tokenizers::Tokenizer;
 /// enabling efficient streaming inference by skipping multiple frames at once.
 pub struct TdtModel {
     pub mel: MelSpectrogram,
-    pub encoder: Session,
-    pub decoder_joint: Session,
+    pub encoder: Arc<Mutex<Session>>,
+    pub decoder_joint: Arc<Mutex<Session>>,
     pub detokenizer: TdtDetokenizer,
     pub durations: Vec<usize>,
 }
@@ -37,8 +39,8 @@ impl TdtModel {
     ) -> Self {
         Self {
             mel,
-            encoder,
-            decoder_joint,
+            encoder: Arc::new(Mutex::new(encoder)),
+            decoder_joint: Arc::new(Mutex::new(decoder_joint)),
             detokenizer,
             durations: vec![0, 1, 2, 3, 4],
         }

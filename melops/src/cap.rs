@@ -17,6 +17,7 @@ use ort::session::builder::SessionBuilder;
 use srtlib::Subtitle;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+use tokio::runtime::Runtime;
 
 /// CLI arguments for caption generation.
 #[derive(Args, Debug)]
@@ -103,15 +104,15 @@ fn caption_from_wav_file(
     tracing::info!("loading model");
 
     let builder = build_session()?;
-    let mut model = TdtModel::from_repo(&model_config.repo, builder)?;
+    let model = TdtModel::from_repo(&model_config.repo, builder)?;
 
     let d = s.elapsed();
     tracing::info!(duration = %format_secs(d.as_secs_f32()), "model loaded");
 
     let s = Instant::now();
 
-    let segments = model
-        .transcribe_chunked(&audio, chunk_config)
+    let segments = Runtime::new()?
+        .block_on(model.transcribe_chunked(&audio, chunk_config))
         .wrap_err("transcription failed")?;
 
     let d = s.elapsed();
@@ -158,7 +159,9 @@ fn build_session() -> ort::Result<SessionBuilder> {
         #[cfg(feature = "coreml")]
         CoreMLExecutionProvider::default().build(),
     ];
-    let builder = Session::builder()?.with_execution_providers(eps)?;
+    let builder = Session::builder()?
+        .with_execution_providers(eps)?
+        .with_intra_threads(2)?;
     Ok(builder)
 }
 

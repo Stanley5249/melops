@@ -21,6 +21,7 @@ tokenizers.workspace = true
 ndarray-stats = "0.7.0"
 rustfft = "6.4.1"
 tracing = "0.1.44"
+futures = "0.3"
 
 [dev-dependencies]
 ort = { workspace = true, features = ["download-binaries", "copy-dylibs"] }
