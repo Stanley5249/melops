@@ -15,11 +15,32 @@ pub trait AsrModel {
     /// The `forward` method returns `Vec<Self::Output>`, a sequence of these items.
     type Output;
 
-    /// Convert frame index to seconds.
-    fn frame_to_secs(&self, frame: usize) -> f32;
+    /// Get the sample rate.
+    fn sample_rate(&self) -> usize;
 
-    /// Convert seconds to frame index.
-    fn secs_to_frame(&self, secs: f32) -> usize;
+    /// Convert seconds to audio samples index.
+    fn secs_to_samples(&self, secs: f32) -> usize;
+
+    /// Convert audio samples index to seconds.
+    fn samples_to_secs(&self, samples: usize) -> f32;
+
+    /// Convert audio samples index to encoder frames index.
+    fn samples_to_frames(&self, samples: usize) -> usize;
+
+    /// Convert encoder frames index to audio samples index.
+    fn frames_to_samples(&self, frames: usize) -> usize;
+
+    /// Convert seconds to encoder output frame index.
+    fn secs_to_frame(&self, secs: f32) -> usize {
+        let samples = self.secs_to_samples(secs);
+        self.samples_to_frames(samples)
+    }
+
+    /// Convert encoder output frame index to seconds.
+    fn frame_to_secs(&self, frame: usize) -> f32 {
+        let samples = self.frames_to_samples(frame);
+        self.samples_to_secs(samples)
+    }
 
     /// Run inference on the given audio, returning a sequence of output items.
     ///
@@ -36,10 +57,10 @@ pub trait AsrModel {
     ///
     /// Used for chunked transcription where frame indices need to be offset
     /// to represent absolute positions in the full audio.
-    fn offset_outputs(output: &mut [Self::Output], frame_offset: usize);
+    fn offset_outputs(output: &mut [Self::Output], frames: usize);
 
     /// Merge output sequences from multiple chunks into a single sequence.
-    fn merge_outputs(chunks: impl IntoIterator<Item = Vec<Self::Output>>) -> Vec<Self::Output>;
+    fn merge_chunks(chunks: impl IntoIterator<Item = Vec<Self::Output>>) -> Vec<Self::Output>;
 
     /// Transcribe audio samples, returning segments.
     fn transcribe(&mut self, audio: &[f32]) -> Result<Vec<Segment>> {
@@ -49,26 +70,30 @@ pub trait AsrModel {
 
     /// Transcribe audio with automatic chunking, returning merged segments.
     fn transcribe_chunked(&mut self, audio: &[f32], config: ChunkConfig) -> Result<Vec<Segment>> {
-        use crate::audio::SAMPLE_RATE;
+        let outputs = config
+            .chunk_audio(audio.len(), self.sample_rate())
+            .map(|range| {
+                let start = self.samples_to_secs(range.start);
+                let end = self.samples_to_secs(range.end);
+                tracing::debug!(
+                    start=%format!("{start:.2}s"),
+                    end=%format!("{end:.2}s"),
+                    "transcribe chunk"
+                );
 
-        let output_chunks: Result<Vec<_>> = config
-            .iter_ranges(audio.len())
-            .enumerate()
-            .map(|(i, (range, offset_sec))| {
+                let frames = self.samples_to_frames(range.start);
+
                 let chunk = &audio[range];
-                let duration_sec = chunk.len() as f32 / SAMPLE_RATE as f32;
 
-                tracing::debug!(chunk = i + 1, duration_sec, "transcribing chunk");
-
-                let frame_offset = self.secs_to_frame(offset_sec);
                 let mut output = self.forward(chunk)?;
-                Self::offset_outputs(&mut output, frame_offset);
+
+                Self::offset_outputs(&mut output, frames);
 
                 Ok(output)
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
 
-        let merged_output = Self::merge_outputs(output_chunks?);
+        let merged_output = Self::merge_chunks(outputs);
         self.to_segments(&merged_output)
     }
 

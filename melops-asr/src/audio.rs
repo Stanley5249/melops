@@ -46,25 +46,26 @@ impl MelSpectrogram {
         mel_spectrogram(audio, self)
     }
 
-    /// Convert frame index to seconds.
-    ///
-    /// # Arguments
-    ///
-    /// * `frame` - Frame index in encoder output
-    /// * `subsampling_factor` - Encoder subsampling factor (e.g., 8x for TDT)
-    pub fn frame_to_secs(&self, frame: usize, subsampling_factor: usize) -> f32 {
-        (frame * subsampling_factor * self.hop_length) as f32 / self.sample_rate as f32
+    /// Convert seconds to audio sample count.
+    pub fn secs_to_samples(&self, secs: f32) -> usize {
+        (secs * self.sample_rate as f32) as usize
     }
 
-    /// Convert seconds to frame index.
+    /// Convert audio sample count to seconds.
+    pub fn samples_to_secs(&self, samples: usize) -> f32 {
+        samples as f32 / self.sample_rate as f32
+    }
+
+    /// Convert audio sample index to mel-spectrogram frame index.
+    pub fn samples_to_mel_frames(&self, samples: usize) -> usize {
+        samples / self.hop_length
+    }
+
+    /// Convert mel-spectrogram frame index to audio sample index.
     ///
-    /// # Arguments
-    ///
-    /// * `secs` - Time in seconds
-    /// * `subsampling_factor` - Encoder subsampling factor (e.g., 8x for TDT)
-    pub fn secs_to_frame(&self, secs: f32, subsampling_factor: usize) -> usize {
-        let samples = (secs * self.sample_rate as f32) as usize;
-        samples / (subsampling_factor * self.hop_length)
+    /// Mel frames are produced at `hop_length` intervals.
+    pub fn mel_frames_to_samples(&self, mel_frames: usize) -> usize {
+        mel_frames * self.hop_length
     }
 }
 

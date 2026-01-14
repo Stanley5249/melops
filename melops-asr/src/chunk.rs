@@ -1,6 +1,6 @@
 //! Audio chunking utilities for processing long audio files.
 
-use crate::audio::SAMPLE_RATE;
+use std::ops::Range;
 
 /// Default chunk duration in seconds (4 minutes)
 pub const DEFAULT_CHUNK_DURATION: f32 = 240.0;
@@ -29,49 +29,26 @@ impl Default for ChunkConfig {
 
 impl ChunkConfig {
     /// Create a new chunk configuration.
-    pub fn new(duration_sec: f32, overlap_sec: f32) -> Self {
-        Self {
-            duration: duration_sec,
-            overlap: overlap_sec,
-        }
+    pub fn new(duration: f32, overlap: f32) -> Self {
+        Self { duration, overlap }
     }
 
-    /// Calculate the step size between chunks (duration - overlap).
-    pub fn step_sec(&self) -> f32 {
-        (self.duration - self.overlap).max(1.0)
-    }
+    /// Create an iterator over chunk ranges for audio with given length and sample rate.
+    pub fn chunk_audio(&self, len: usize, sample_rate: usize) -> ChunkRangeIter {
+        let chunk_size = (self.duration * sample_rate as f32) as usize;
+        let overlap_size = (self.overlap * sample_rate as f32) as usize;
+        let step_size = chunk_size.saturating_sub(overlap_size);
 
-    /// Get chunk size in samples.
-    pub fn chunk_samples(&self) -> usize {
-        (self.duration * SAMPLE_RATE as f32) as usize
-    }
-
-    /// Get overlap size in samples.
-    pub fn overlap_samples(&self) -> usize {
-        (self.overlap * SAMPLE_RATE as f32) as usize
-    }
-
-    /// Get step size in samples (chunk - overlap).
-    pub fn step_samples(&self) -> usize {
-        self.chunk_samples().saturating_sub(self.overlap_samples())
-    }
-
-    /// Create an iterator over chunk ranges for a given total size.
-    ///
-    /// Returns an iterator of `(Range<usize>, f32)` where:
-    /// - First element is the range to slice the data
-    /// - Second element is the time offset in seconds
-    pub fn iter_ranges(&self, len: usize) -> ChunkRangeIter {
         ChunkRangeIter {
             len,
-            chunk_size: self.chunk_samples(),
-            step_size: self.step_samples(),
+            chunk_size,
+            step_size,
             position: 0,
         }
     }
 }
 
-/// Iterator over chunk ranges with time offsets.
+/// Iterator over chunk ranges.
 pub struct ChunkRangeIter {
     len: usize,
     chunk_size: usize,
@@ -80,125 +57,75 @@ pub struct ChunkRangeIter {
 }
 
 impl Iterator for ChunkRangeIter {
-    type Item = (std::ops::Range<usize>, f32);
+    type Item = Range<usize>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // If we haven't started yet and audio is short, return full range
-        if self.position == 0 && self.len <= self.chunk_size {
-            self.position = self.len; // Mark as consumed
-            return Some((0..self.len, 0.0));
-        }
-
-        // Check if we've reached the end
         if self.position >= self.len {
             return None;
         }
 
         let start = self.position;
         let end = (start + self.chunk_size).min(self.len);
-        let offset_sec = start as f32 / SAMPLE_RATE as f32;
 
         self.position += self.step_size;
 
-        Some((start..end, offset_sec))
+        Some(start..end)
     }
-}
-
-/// Iterator over audio chunks with their time offsets.
-///
-/// Yields tuples of `(&[f32], f32)` where:
-/// - First element is the audio chunk slice
-/// - Second element is the start time offset in seconds
-pub fn chunk_audio<'a>(
-    data: &'a [f32],
-    config: &'a ChunkConfig,
-) -> impl Iterator<Item = (&'a [f32], f32)> + 'a {
-    config
-        .iter_ranges(data.len())
-        .map(move |(range, offset)| (&data[range], offset))
-}
-
-/// Calculate the number of chunks that will be produced for a given audio duration.
-pub fn estimate_chunk_count(total_duration_sec: f32, config: &ChunkConfig) -> usize {
-    if total_duration_sec <= config.duration {
-        return 1;
-    }
-
-    let step = config.step_sec();
-    ((total_duration_sec - config.duration) / step).ceil() as usize + 1
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn make_audio(duration_sec: f32) -> Vec<f32> {
-        vec![0.0; (duration_sec * SAMPLE_RATE as f32) as usize]
+    const SAMPLE_RATE: usize = 16000;
+
+    #[test]
+    fn single_chunk_when_audio_shorter_than_duration() {
+        let config = ChunkConfig::new(60.0, 1.0);
+        let len = 30 * SAMPLE_RATE; // 30 seconds
+
+        let mut iter = config.chunk_audio(len, SAMPLE_RATE);
+
+        assert_eq!(iter.next(), Some(0..len));
+        assert_eq!(iter.next(), None);
     }
 
     #[test]
-    fn short_audio_returns_single_chunk() {
-        let audio = make_audio(30.0); // 30 seconds
+    fn multiple_chunks_with_overlap() {
         let config = ChunkConfig::new(60.0, 1.0);
+        let len = 150 * SAMPLE_RATE; // 150 seconds
 
-        let mut iter = chunk_audio(&audio, &config);
-        let (chunk, offset_sec) = iter.next().unwrap();
-
-        assert!((offset_sec - 0.0).abs() < 0.001);
-        assert_eq!(chunk.len(), audio.len());
-        assert!(iter.next().is_none());
-    }
-
-    #[test]
-    fn long_audio_splits_with_overlap() {
-        let audio = make_audio(150.0); // 2.5 minutes
-        let config = ChunkConfig::new(60.0, 1.0);
-
-        let mut iter = chunk_audio(&audio, &config);
+        let chunks: Vec<_> = config.chunk_audio(len, SAMPLE_RATE).collect();
 
         // Step is 59 seconds (60 - 1)
         // Chunks at: 0, 59, 118
-        let (_, offset_sec) = iter.next().unwrap();
-        assert!((offset_sec - 0.0).abs() < 0.001);
-
-        let (_, offset_sec) = iter.next().unwrap();
-        assert!((offset_sec - 59.0).abs() < 0.001);
-
-        let (_, offset_sec) = iter.next().unwrap();
-        assert!((offset_sec - 118.0).abs() < 0.001);
-
-        assert!(iter.next().is_none());
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0], 0..60 * SAMPLE_RATE);
+        assert_eq!(chunks[1], 59 * SAMPLE_RATE..119 * SAMPLE_RATE);
+        assert_eq!(chunks[2], 118 * SAMPLE_RATE..150 * SAMPLE_RATE);
     }
 
     #[test]
-    fn step_calculation() {
-        let config = ChunkConfig::new(60.0, 5.0);
-
-        assert!((config.step_sec() - 55.0).abs() < 0.001);
-        assert_eq!(config.step_samples(), 55 * SAMPLE_RATE as usize);
-    }
-
-    #[test]
-    fn chunk_samples_calculation() {
+    fn exact_boundary() {
         let config = ChunkConfig::new(60.0, 1.0);
+        let len = 118 * SAMPLE_RATE; // Exactly at step boundary
 
-        assert_eq!(config.chunk_samples(), 60 * SAMPLE_RATE as usize);
-        assert_eq!(config.overlap_samples(), SAMPLE_RATE as usize);
-        assert_eq!(config.step_samples(), 59 * SAMPLE_RATE as usize);
+        let chunks: Vec<_> = config.chunk_audio(len, SAMPLE_RATE).collect();
+
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0], 0..60 * SAMPLE_RATE);
+        assert_eq!(chunks[1], 59 * SAMPLE_RATE..118 * SAMPLE_RATE);
     }
 
     #[test]
-    fn estimate_count_short() {
-        let config = ChunkConfig::new(60.0, 1.0);
+    fn zero_overlap() {
+        let config = ChunkConfig::new(60.0, 0.0);
+        let len = 120 * SAMPLE_RATE;
 
-        assert_eq!(estimate_chunk_count(30.0, &config), 1);
-    }
+        let chunks: Vec<_> = config.chunk_audio(len, SAMPLE_RATE).collect();
 
-    #[test]
-    fn estimate_count_long() {
-        let config = ChunkConfig::new(60.0, 1.0);
-
-        // 150 seconds, step 59: chunks at 0, 59, 118 = 3 chunks
-        assert_eq!(estimate_chunk_count(150.0, &config), 3);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0], 0..60 * SAMPLE_RATE);
+        assert_eq!(chunks[1], 60 * SAMPLE_RATE..120 * SAMPLE_RATE);
     }
 }

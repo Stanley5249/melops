@@ -13,13 +13,27 @@ impl AsrModel for TdtModel {
     /// position and duration. The `forward` method returns a vector of these items.
     type Output = TokenDuration;
 
-    fn frame_to_secs(&self, frame: usize) -> f32 {
-        self.mel.frame_to_secs(frame, Self::SUBSAMPLING_FACTOR)
+    fn sample_rate(&self) -> usize {
+        self.mel.sample_rate
     }
 
-    fn secs_to_frame(&self, secs: f32) -> usize {
-        self.mel.secs_to_frame(secs, Self::SUBSAMPLING_FACTOR)
+    fn secs_to_samples(&self, secs: f32) -> usize {
+        self.mel.secs_to_samples(secs)
     }
+
+    fn samples_to_secs(&self, samples: usize) -> f32 {
+        self.mel.samples_to_secs(samples)
+    }
+
+    fn samples_to_frames(&self, samples: usize) -> usize {
+        self.mel.samples_to_mel_frames(samples) / Self::SUBSAMPLING_FACTOR
+    }
+
+    fn frames_to_samples(&self, frames: usize) -> usize {
+        self.mel
+            .mel_frames_to_samples(frames * Self::SUBSAMPLING_FACTOR)
+    }
+
     /// Run TDT inference on audio, returning token-duration sequence.
     fn forward(&mut self, audio: &[f32]) -> Result<Vec<Self::Output>> {
         let features = self.mel.apply(audio);
@@ -55,7 +69,7 @@ impl AsrModel for TdtModel {
     }
 
     /// Merge token-duration sequences from multiple chunks.
-    fn merge_outputs(chunks: impl IntoIterator<Item = Vec<Self::Output>>) -> Vec<Self::Output> {
+    fn merge_chunks(chunks: impl IntoIterator<Item = Vec<Self::Output>>) -> Vec<Self::Output> {
         super::merge::merge_outputs(chunks)
     }
 }
