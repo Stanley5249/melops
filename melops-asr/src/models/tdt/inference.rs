@@ -8,6 +8,7 @@ use ndarray_stats::QuantileExt;
 use ort::inputs;
 use ort::session::RunOptions;
 use ort::value::Tensor;
+use tracing::instrument;
 
 /// Encoder outputs and sequence lengths.
 pub(super) struct TdtEncoderOutputs {
@@ -48,6 +49,7 @@ struct DecoderState {
 }
 
 impl TdtModel {
+    #[instrument(skip_all)]
     pub(super) async fn encode(&self, audio_signal: Array2<f32>) -> Result<TdtEncoderOutputs> {
         let time_steps = audio_signal.dim().0;
         let audio_lengths = Tensor::from_array(([1_usize], vec![time_steps as i64]))?;
@@ -84,6 +86,7 @@ impl TdtModel {
         })
     }
 
+    #[instrument(skip_all)]
     pub(super) async fn greedy_decode(
         &self,
         values: TdtEncoderOutputs,
@@ -192,6 +195,7 @@ impl TdtModel {
         Ok(DecodedOutput { token_id, duration })
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn label_loop(
         &self,
         mut frame_index: usize,

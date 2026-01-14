@@ -4,11 +4,13 @@ use crate::audio::MelSpectrogram;
 use crate::models::tdt::detokenizer::TdtDetokenizer;
 use crate::types::ModelRepo;
 use eyre::{Result, WrapErr, eyre};
-use futures::lock::Mutex;
 use ort::session::Session;
 use ort::session::builder::SessionBuilder;
+use std::path::Path;
 use std::sync::Arc;
 use tokenizers::Tokenizer;
+use tokio::sync::Mutex;
+use tracing::instrument;
 
 /// TDT model for ASR inference.
 ///
@@ -47,6 +49,7 @@ impl TdtModel {
     }
 
     /// Load TDT model from a model repository.
+    #[instrument(skip_all)]
     pub fn from_repo(repo: &ModelRepo, session_builder: SessionBuilder) -> Result<Self> {
         let encoder_path = repo.resolve_any(&[
             "encoder-model.onnx",
@@ -62,31 +65,41 @@ impl TdtModel {
 
         let tokenizer_path = repo.resolve("tokenizer.json")?;
 
-        let encoder_session = session_builder
-            .clone()
-            .commit_from_file(&encoder_path)
-            .wrap_err("failed to load encoder session")?;
-
-        let decoder_session = session_builder
-            .commit_from_file(&decoder_path)
-            .wrap_err("failed to load decoder session")?;
-
-        let tokenizer = Tokenizer::from_file(&tokenizer_path)
-            .map_err(|e| eyre!(e))
-            .wrap_err(format!(
-                "failed to load tokenizer from {:?}",
-                tokenizer_path
-            ))?;
-
-        let detokenizer = TdtDetokenizer::new(tokenizer);
-
         let model = TdtModel::new(
             MelSpectrogram::TDT,
-            encoder_session,
-            decoder_session,
-            detokenizer,
+            Self::load_encoder(&encoder_path, &session_builder)?,
+            Self::load_decoder_joint(&decoder_path, &session_builder)?,
+            Self::load_detokenizer(&tokenizer_path)?,
         );
 
         Ok(model)
+    }
+
+    /// Load encoder ONNX session.
+    #[instrument(skip_all, fields(file=?file.display()))]
+    fn load_encoder(file: &Path, session_builder: &SessionBuilder) -> Result<Session> {
+        session_builder
+            .clone()
+            .commit_from_file(file)
+            .wrap_err("failed to load encoder session")
+    }
+
+    /// Load decoder ONNX session.
+    #[instrument(skip_all, fields(file=?file.display()))]
+    fn load_decoder_joint(file: &Path, session_builder: &SessionBuilder) -> Result<Session> {
+        session_builder
+            .clone()
+            .commit_from_file(file)
+            .wrap_err("failed to load decoder session")
+    }
+
+    /// Load and create detokenizer.
+    #[instrument(skip_all, fields(file=?file.display()))]
+    fn load_detokenizer(file: &Path) -> Result<TdtDetokenizer> {
+        let tokenizer = Tokenizer::from_file(file)
+            .map_err(|e| eyre!(e))
+            .wrap_err("failed to load tokenizer")?;
+
+        Ok(TdtDetokenizer::new(tokenizer))
     }
 }

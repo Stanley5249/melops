@@ -44,10 +44,7 @@ impl ModelRepo {
     /// Resolve a file name to its full path in this repository.
     pub fn resolve(&self, file_name: &str) -> Result<PathBuf> {
         match self {
-            ModelRepo::Path(path) => path
-                .join(file_name)
-                .canonicalize()
-                .wrap_err(format!("failed to resolve model: {file_name}")),
+            ModelRepo::Path(path) => Ok(path.join(file_name)),
             ModelRepo::Cache(cache_repo) => cache_repo
                 .get(file_name)
                 .wrap_err(format!("failed to download from cache: {file_name}")),

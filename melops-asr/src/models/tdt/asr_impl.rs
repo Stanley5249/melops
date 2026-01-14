@@ -5,6 +5,7 @@ use crate::models::tdt::core::TdtModel;
 use crate::models::tdt::detokenizer::TokenDuration;
 use crate::traits::AsrModel;
 use crate::types::Segment;
+use tracing::instrument;
 
 impl AsrModel for TdtModel {
     /// Model output is individual token-duration items.
@@ -35,6 +36,7 @@ impl AsrModel for TdtModel {
     }
 
     /// Run TDT inference on audio, returning token-duration sequence.
+    #[instrument(skip_all)]
     async fn forward(&self, audio: &[f32]) -> Result<Vec<Self::Output>> {
         let features = self.mel.apply(audio);
         let encoder_output = self.encode(features).await?;

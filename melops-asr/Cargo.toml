@@ -17,6 +17,7 @@ ndarray.workspace = true
 ort = { workspace = true, features = ["std", "ndarray", "tracing"] }
 thiserror.workspace = true
 tokenizers.workspace = true
+tokio = { workspace = true, features = ["sync", "tracing"] }
 
 ndarray-stats = "0.7.0"
 rustfft = "6.4.1"

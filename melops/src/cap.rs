@@ -16,8 +16,7 @@ use ort::session::Session;
 use ort::session::builder::SessionBuilder;
 use srtlib::Subtitle;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
-use tokio::runtime::Runtime;
+use tokio::runtime::Builder;
 
 /// CLI arguments for caption generation.
 #[derive(Args, Debug)]
@@ -99,24 +98,13 @@ fn caption_from_wav_file(
     let audio = read_audio_mono(wav_path)
         .wrap_err_with(|| format!("failed to load audio: {:?}", wav_path.display()))?;
 
-    let s = Instant::now();
-
-    tracing::info!("loading model");
-
     let builder = build_session()?;
     let model = TdtModel::from_repo(&model_config.repo, builder)?;
 
-    let d = s.elapsed();
-    tracing::info!(duration = %format_secs(d.as_secs_f32()), "model loaded");
-
-    let s = Instant::now();
-
-    let segments = Runtime::new()?
+    let segments = Builder::new_current_thread()
+        .build()?
         .block_on(model.transcribe_chunked(&audio, chunk_config))
         .wrap_err("transcription failed")?;
-
-    let d = s.elapsed();
-    tracing::info!(duration = %format_secs(d.as_secs_f32()), "inference completed");
 
     // Regroup segments for comfortable speed
     let segments = Segmenter::COMFORTABLE.regroup(&segments);
@@ -159,13 +147,21 @@ fn build_session() -> ort::Result<SessionBuilder> {
         #[cfg(feature = "coreml")]
         CoreMLExecutionProvider::default().build(),
     ];
-    let builder = Session::builder()?
-        .with_execution_providers(eps)?
-        .with_intra_threads(2)?;
-    Ok(builder)
-}
 
-/// Format seconds as a string with two decimal places.
-fn format_secs(secs: f32) -> String {
-    format!("{:.2}s", secs)
+    // Async sessions use intra thread pools
+    let builder = Session::builder()?.with_execution_providers(eps)?;
+
+    #[cfg(not(feature = "openvino"))]
+    let builder = builder
+        .with_intra_threads(0)?
+        .with_intra_op_spinning(true)?;
+
+    // According to the OpenVINO documentation, disabling optimization can often yield better results
+    #[cfg(feature = "openvino")]
+    let builder = builder
+        .with_intra_threads(2)?
+        .with_intra_op_spinning(true)?
+        .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Disable)?;
+
+    Ok(builder)
 }

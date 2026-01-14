@@ -1,3 +1,2 @@
-[env]
-CFLAGS = "/MD"
-CXXFLAGS = "/MD"
+[build]
+rustflags = ["--cfg", "tokio_unstable"]

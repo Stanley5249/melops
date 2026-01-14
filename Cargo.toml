@@ -29,3 +29,4 @@ thiserror = "2.0.17"
 tokenizers = { version = "0.22.2", default-features = false, features = [
   "onig",
 ] }
+tokio = "1.49.0"

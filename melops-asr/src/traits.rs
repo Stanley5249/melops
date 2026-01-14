@@ -1,10 +1,11 @@
 //! Core traits for ASR pipeline components.
 
 use crate::chunk::ChunkConfig;
-use crate::error::Error;
 use crate::error::Result;
 use crate::types::Segment;
 use futures::stream::{self, StreamExt, TryStreamExt};
+use std::ops::Range;
+use tracing::instrument;
 
 /// ASR model that performs inference on preprocessed features.
 ///
@@ -51,6 +52,27 @@ pub trait AsrModel {
     /// (e.g., token with timing information).
     async fn forward(&self, audio: &[f32]) -> Result<Vec<Self::Output>>;
 
+    /// Run inference on a chunk of audio with offset, returning model outputs.
+    async fn forward_chunked(
+        &self,
+        audio: &[f32],
+        range: Range<usize>,
+    ) -> Result<Vec<Self::Output>> {
+        let start = format!("{:.2}s", self.samples_to_secs(range.start));
+        let end = format!("{:.2}s", self.samples_to_secs(range.end));
+        tracing::info!(%start, %end);
+
+        let frames = self.samples_to_frames(range.start);
+
+        let chunk = &audio[range];
+
+        let mut output = self.forward(chunk).await?;
+
+        Self::offset_outputs(&mut output, frames);
+
+        Ok(output)
+    }
+
     /// Convert a sequence of model outputs to text segments with timestamps.
     fn to_segments(&self, output: &[Self::Output]) -> Result<Vec<Segment>>;
 
@@ -64,34 +86,18 @@ pub trait AsrModel {
     fn merge_chunks(chunks: impl IntoIterator<Item = Vec<Self::Output>>) -> Vec<Self::Output>;
 
     /// Transcribe audio samples, returning segments.
+    #[instrument(skip_all)]
     async fn transcribe(&self, audio: &[f32]) -> Result<Vec<Segment>> {
         let output = self.forward(audio).await?;
         self.to_segments(&output)
     }
 
     /// Transcribe audio with automatic chunking, returning merged segments.
+    #[instrument(skip_all)]
     async fn transcribe_chunked(&self, audio: &[f32], config: ChunkConfig) -> Result<Vec<Segment>> {
         let chunks = config
             .chunk_audio(audio.len(), self.sample_rate())
-            .map(async |range| {
-                let start = self.samples_to_secs(range.start);
-                let end = self.samples_to_secs(range.end);
-                tracing::debug!(
-                    start=%format!("{start:.2}s"),
-                    end=%format!("{end:.2}s"),
-                    "transcribe chunk"
-                );
-
-                let frames = self.samples_to_frames(range.start);
-
-                let chunk = &audio[range];
-
-                let mut output = self.forward(chunk).await?;
-
-                Self::offset_outputs(&mut output, frames);
-
-                Ok::<_, Error>(output)
-            });
+            .map(|range| self.forward_chunked(audio, range));
 
         let chunks: Vec<_> = stream::iter(chunks).buffered(2).try_collect().await?;
 
