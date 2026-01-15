@@ -10,10 +10,6 @@ use melops_asr::audio::read_audio_mono;
 use melops_asr::chunk::ChunkConfig;
 use melops_asr::models::tdt::core::TdtModel;
 use melops_asr::traits::AsrModel;
-#[allow(unused_imports)]
-use ort::ep::*;
-use ort::session::Session;
-use ort::session::builder::SessionBuilder;
 use srtlib::Subtitle;
 use std::path::{Path, PathBuf};
 use tokio::runtime::Builder;
@@ -98,7 +94,7 @@ fn caption_from_wav_file(
     let audio = read_audio_mono(wav_path)
         .wrap_err_with(|| format!("failed to load audio: {:?}", wav_path.display()))?;
 
-    let builder = build_session()?;
+    let builder = crate::ort::build_session()?;
     let model = TdtModel::from_repo(&model_config.repo, builder)?;
 
     let segments = Builder::new_current_thread()
@@ -112,56 +108,4 @@ fn caption_from_wav_file(
     let subtitles = srt::to_subtitles(&segments);
 
     Ok(subtitles)
-}
-
-/// Build execution config with execution providers configured by Cargo features.
-///
-/// Configures ONNX Runtime session with execution providers in priority order. The first
-/// available provider is used; CPU is always available as fallback.
-///
-/// # Execution Providers
-///
-/// Enabled via Cargo features:
-/// - `cuda` - NVIDIA CUDA
-/// - `tensorrt` - NVIDIA TensorRT
-/// - `openvino` - Intel OpenVINO
-/// - `directml` - DirectML (Windows)
-/// - `coreml` - CoreML (macOS)
-///
-/// Ensure required hardware, drivers, and runtime dependencies are installed for the
-/// desired provider.
-fn build_session() -> ort::Result<SessionBuilder> {
-    let eps = [
-        #[cfg(feature = "cuda")]
-        CUDAExecutionProvider::default().build(),
-        #[cfg(feature = "tensorrt")]
-        TensorRTExecutionProvider::default().build(),
-        #[cfg(feature = "openvino")]
-        OpenVINOExecutionProvider::default()
-            .with_device_type("HETERO:GPU,CPU")
-            .with_cache_dir(".cache/ort")
-            .with_precision("FP16")
-            .build(),
-        #[cfg(feature = "directml")]
-        DirectMLExecutionProvider::default().build(),
-        #[cfg(feature = "coreml")]
-        CoreMLExecutionProvider::default().build(),
-    ];
-
-    // Async sessions use intra thread pools
-    let builder = Session::builder()?.with_execution_providers(eps)?;
-
-    #[cfg(not(feature = "openvino"))]
-    let builder = builder
-        .with_intra_threads(0)?
-        .with_intra_op_spinning(true)?;
-
-    // According to the OpenVINO documentation, disabling optimization can often yield better results
-    #[cfg(feature = "openvino")]
-    let builder = builder
-        .with_intra_threads(2)?
-        .with_intra_op_spinning(true)?
-        .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Disable)?;
-
-    Ok(builder)
 }
