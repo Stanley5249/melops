@@ -2,7 +2,7 @@
 
 use crate::error::{ModelError, Result};
 use crate::models::tdt::core::TdtModel;
-use crate::models::tdt::detokenizer::TokenDuration;
+use crate::types::TokenDuration;
 use ndarray::prelude::*;
 use ndarray_stats::QuantileExt;
 use ort::inputs;

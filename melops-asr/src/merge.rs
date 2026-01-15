@@ -1,9 +1,9 @@
 //! Merge overlapping token-duration chunks.
 
-use crate::models::tdt::detokenizer::TokenDuration;
+use crate::types::TokenDuration;
 
 /// Merge multiple token-duration chunks with frame-based overlap detection.
-pub fn merge_outputs<I>(chunks: I) -> Vec<TokenDuration>
+pub fn merge_chunks<I>(chunks: I) -> Vec<TokenDuration>
 where
     I: IntoIterator<Item = Vec<TokenDuration>>,
 {
@@ -45,7 +45,7 @@ mod tests {
             duration: 10,
         }];
 
-        let result = merge_outputs([chunk1, chunk2]);
+        let result = merge_chunks([chunk1, chunk2]);
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].token_id, 1);
@@ -61,7 +61,7 @@ mod tests {
             TokenDuration::new(4, 25, 5),
         ];
 
-        let result = merge_outputs([chunk1, chunk2]);
+        let result = merge_chunks([chunk1, chunk2]);
 
         assert_eq!(result.len(), 4);
         assert_eq!(result[0].frame_index, 0);
@@ -76,7 +76,7 @@ mod tests {
 
         let chunk2 = vec![TokenDuration::new(1, 10, 10), TokenDuration::new(2, 20, 5)];
 
-        let result = merge_outputs([chunk1, chunk2]);
+        let result = merge_chunks([chunk1, chunk2]);
 
         assert_eq!(result.len(), 3);
         assert_eq!(result[0].frame_index, 0);

@@ -5,6 +5,27 @@ use hf_hub::CacheRepo;
 use hf_hub::api::sync::ApiRepo;
 use std::path::PathBuf;
 
+/// Token with timing information from decoder output.
+#[derive(Clone, Debug)]
+pub struct TokenDuration {
+    /// Token ID (not blank)
+    pub token_id: usize,
+    /// Encoder frame index where token was emitted
+    pub frame_index: usize,
+    /// Duration prediction (number of frames to skip)
+    pub duration: usize,
+}
+
+impl TokenDuration {
+    pub fn new(token_id: usize, frame_index: usize, duration: usize) -> Self {
+        Self {
+            token_id,
+            frame_index,
+            duration,
+        }
+    }
+}
+
 /// Text segment with timestamps.
 ///
 /// Represents a portion of transcribed text with start and end times in seconds.

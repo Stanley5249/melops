@@ -2,7 +2,8 @@
 
 use crate::chunk::ChunkConfig;
 use crate::error::Result;
-use crate::types::Segment;
+use crate::merge::merge_chunks;
+use crate::types::{Segment, TokenDuration};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use std::ops::Range;
 use tracing::instrument;
@@ -13,12 +14,6 @@ use tracing::instrument;
 /// while providing a uniform interface for the pipeline.
 #[allow(async_fn_in_trait)]
 pub trait AsrModel {
-    /// Output type from model inference.
-    ///
-    /// Represents a single unit of model output (e.g., a token with timing).
-    /// The `forward` method returns `Vec<Self::Output>`, a sequence of these items.
-    type Output;
-
     /// Get the sample rate.
     fn sample_rate(&self) -> usize;
 
@@ -46,18 +41,15 @@ pub trait AsrModel {
         self.samples_to_secs(samples)
     }
 
-    /// Run inference on the given audio, returning a sequence of output items.
-    ///
-    /// Returns `Vec<Self::Output>` where each item represents a decoded unit
-    /// (e.g., token with timing information).
-    async fn forward(&self, audio: &[f32]) -> Result<Vec<Self::Output>>;
+    /// Run inference on the given audio, returning a sequence of tokens with timing.
+    async fn forward(&self, audio: &[f32]) -> Result<Vec<TokenDuration>>;
 
     /// Run inference on a chunk of audio with offset, returning model outputs.
     async fn forward_chunked(
         &self,
         audio: &[f32],
         range: Range<usize>,
-    ) -> Result<Vec<Self::Output>> {
+    ) -> Result<Vec<TokenDuration>> {
         let start = format!("{:.2}s", self.samples_to_secs(range.start));
         let end = format!("{:.2}s", self.samples_to_secs(range.end));
         tracing::info!(%start, %end);
@@ -68,22 +60,16 @@ pub trait AsrModel {
 
         let mut output = self.forward(chunk).await?;
 
-        Self::offset_outputs(&mut output, frames);
+        // Inline offset_outputs: adjust frame indices by offset
+        for token in &mut output {
+            token.frame_index += frames;
+        }
 
         Ok(output)
     }
 
     /// Convert a sequence of model outputs to text segments with timestamps.
-    fn to_segments(&self, output: &[Self::Output]) -> Result<Vec<Segment>>;
-
-    /// Apply frame offset to a sequence of model outputs.
-    ///
-    /// Used for chunked transcription where frame indices need to be offset
-    /// to represent absolute positions in the full audio.
-    fn offset_outputs(output: &mut [Self::Output], frames: usize);
-
-    /// Merge output sequences from multiple chunks into a single sequence.
-    fn merge_chunks(chunks: impl IntoIterator<Item = Vec<Self::Output>>) -> Vec<Self::Output>;
+    fn to_segments(&self, output: &[TokenDuration]) -> Result<Vec<Segment>>;
 
     /// Transcribe audio samples, returning segments.
     #[instrument(skip_all)]
@@ -101,7 +87,7 @@ pub trait AsrModel {
 
         let chunks: Vec<_> = stream::iter(chunks).buffered(2).try_collect().await?;
 
-        let merged_output = Self::merge_chunks(chunks);
+        let merged_output = merge_chunks(chunks);
         self.to_segments(&merged_output)
     }
 

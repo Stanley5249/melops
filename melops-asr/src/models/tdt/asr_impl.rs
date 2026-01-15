@@ -2,18 +2,12 @@
 
 use crate::error::{Error, Result};
 use crate::models::tdt::core::TdtModel;
-use crate::models::tdt::detokenizer::TokenDuration;
 use crate::traits::AsrModel;
 use crate::types::Segment;
+use crate::types::TokenDuration;
 use tracing::instrument;
 
 impl AsrModel for TdtModel {
-    /// Model output is individual token-duration items.
-    ///
-    /// Each `TokenDuration` represents a single decoded token with its frame
-    /// position and duration. The `forward` method returns a vector of these items.
-    type Output = TokenDuration;
-
     fn sample_rate(&self) -> usize {
         self.mel.sample_rate
     }
@@ -37,7 +31,7 @@ impl AsrModel for TdtModel {
 
     /// Run TDT inference on audio, returning token-duration sequence.
     #[instrument(skip_all)]
-    async fn forward(&self, audio: &[f32]) -> Result<Vec<Self::Output>> {
+    async fn forward(&self, audio: &[f32]) -> Result<Vec<TokenDuration>> {
         let features = self.mel.apply(audio);
         let encoder_output = self.encode(features).await?;
         self.greedy_decode(encoder_output).await
@@ -61,17 +55,5 @@ impl AsrModel for TdtModel {
             .iter()
             .filter_map(output_to_segment)
             .collect()
-    }
-
-    /// Offset frame indices in token-duration sequence for chunked processing.
-    fn offset_outputs(outputs: &mut [Self::Output], frame_offset: usize) {
-        for td in outputs.iter_mut() {
-            td.frame_index += frame_offset;
-        }
-    }
-
-    /// Merge token-duration sequences from multiple chunks.
-    fn merge_chunks(chunks: impl IntoIterator<Item = Vec<Self::Output>>) -> Vec<Self::Output> {
-        super::merge::merge_outputs(chunks)
     }
 }

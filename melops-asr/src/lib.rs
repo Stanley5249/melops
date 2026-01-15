@@ -34,6 +34,7 @@
 pub mod audio;
 pub mod chunk;
 pub mod error;
+pub mod merge;
 pub mod models;
 pub mod traits;
 pub mod types;
