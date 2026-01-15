@@ -91,11 +91,10 @@ impl TdtModel {
         &self,
         values: TdtEncoderOutputs,
     ) -> Result<Vec<TokenDuration>> {
-        let blank_id = self.detokenizer.vocab_size();
-        let max_symbols_per_step = 10;
+        let decoder_options = RunOptions::new()?.with_tag("decoder_joint")?;
 
         let mut state = DecoderState {
-            target: Tensor::from_array(([1, 1], vec![blank_id as i32]))?,
+            target: Tensor::from_array(([1, 1], vec![self.tokenizer.blank_id as i32]))?,
             target_length: Tensor::from_array(([1], vec![1_i32]))?,
             states_1: Tensor::from_array(Array3::<f32>::zeros((2, 1, 640)))?,
             states_2: Tensor::from_array(Array3::<f32>::zeros((2, 1, 640)))?,
@@ -121,12 +120,11 @@ impl TdtModel {
             frame_index = self
                 .label_loop(
                     frame_index,
+                    encoded_length,
                     &frame,
                     &mut state,
+                    &decoder_options,
                     &mut tokens,
-                    blank_id,
-                    max_symbols_per_step,
-                    encoded_length,
                 )
                 .await?;
         }
@@ -138,6 +136,7 @@ impl TdtModel {
         &self,
         frame: &Tensor<f32>,
         state: &DecoderState,
+        options: &RunOptions,
     ) -> Result<TdtDecoderJointOutputs> {
         let inputs = inputs![
             "encoder_outputs" => frame,
@@ -147,11 +146,9 @@ impl TdtModel {
             "input_states_2" => &state.states_2
         ];
 
-        let options = RunOptions::new()?.with_tag("decoder_joint")?;
-
         let mut decoder_guard = self.decoder_joint.lock().await;
 
-        let mut session_outputs = decoder_guard.run_async(inputs, &options)?.await?;
+        let mut session_outputs = decoder_guard.run_async(inputs, options)?.await?;
 
         let outputs = session_outputs
             .remove("outputs")
@@ -175,54 +172,50 @@ impl TdtModel {
         })
     }
 
-    fn parse_logits(&self, logits: &Tensor<f32>, blank_id: usize) -> Result<DecodedOutput> {
+    fn parse_logits(&self, logits: &Tensor<f32>) -> Result<DecodedOutput> {
         let logits_view = logits.extract_array();
         let logits_flat = logits_view.flatten();
 
-        let text_logits = logits_flat.slice_axis(Axis(0), (0..blank_id + 1).into());
+        let text_logits = logits_flat.slice_axis(Axis(0), (0..self.tokenizer.blank_id + 1).into());
         let token_id = text_logits.argmax()?;
 
-        let duration_logits = logits_flat.slice_axis(Axis(0), (blank_id + 1..).into());
+        let duration_logits =
+            logits_flat.slice_axis(Axis(0), (self.tokenizer.blank_id + 1..).into());
         let duration_idx = duration_logits.argmax()?;
 
-        let duration = self.durations.get(duration_idx).copied().ok_or_else(|| {
+        let duration = Self::DURATIONS.get(duration_idx).copied().ok_or_else(|| {
             ModelError::DurationIndexOutOfBounds {
                 index: duration_idx,
-                max: self.durations.len() - 1,
+                max: Self::DURATIONS.len() - 1,
             }
         })?;
 
         Ok(DecodedOutput { token_id, duration })
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn label_loop(
         &self,
         mut frame_index: usize,
+        encoded_length: usize,
         frame: &Tensor<f32>,
         state: &mut DecoderState,
+        decoder_options: &RunOptions,
         tokens: &mut Vec<TokenDuration>,
-        blank_id: usize,
-        max_symbols_per_step: usize,
-        encoded_length: usize,
     ) -> Result<usize> {
-        for _ in 0..max_symbols_per_step {
-            let decoder_outputs = self.decode(frame, state).await?;
+        for _ in 0..Self::MAX_TOKENS_PER_FRAME {
+            let decoder_outputs = self.decode(frame, state, decoder_options).await?;
 
-            let decoded = self.parse_logits(&decoder_outputs.outputs, blank_id)?;
+            let decoded = self.parse_logits(&decoder_outputs.outputs)?;
 
             let skip = decoded.duration;
 
-            if decoded.token_id != blank_id {
+            if decoded.token_id != self.tokenizer.blank_id {
                 // With fresh allocations, we can use direct assignment
                 state.states_1 = decoder_outputs.output_states_1;
                 state.states_2 = decoder_outputs.output_states_2;
 
-                tokens.push(TokenDuration {
-                    token_id: decoded.token_id,
-                    frame_index,
-                    duration: skip,
-                });
+                tokens.push(TokenDuration::new(decoded.token_id, frame_index, skip));
+
                 state.target[[0, 0]] = decoded.token_id as i32;
             }
 

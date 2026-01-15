@@ -23,16 +23,6 @@ pub struct MelSpectrogram {
 }
 
 impl MelSpectrogram {
-    /// TDT model mel-spectrogram extractor (128 mel features).
-    pub const TDT: Self = Self {
-        n_mels: 128,
-        hop_length: 160,
-        n_fft: 512,
-        preemphasis: 0.97,
-        sample_rate: 16000,
-        win_length: 400,
-    };
-
     /// Apply mel-spectrogram extraction to audio samples.
     ///
     /// # Arguments

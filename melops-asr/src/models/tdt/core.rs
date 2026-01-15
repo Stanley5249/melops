@@ -1,7 +1,7 @@
 //! Core TDT model definition and loading.
 
 use crate::audio::MelSpectrogram;
-use crate::models::tdt::detokenizer::TdtDetokenizer;
+use crate::models::tdt::tokenizer::TdtTokenizer;
 use crate::types::ModelRepo;
 use eyre::{Result, WrapErr, eyre};
 use ort::session::Session;
@@ -18,33 +18,46 @@ use tracing::instrument;
 /// joint decoder components. The decoder predicts both tokens and their durations,
 /// enabling efficient streaming inference by skipping multiple frames at once.
 pub struct TdtModel {
-    pub mel: MelSpectrogram,
     pub encoder: Arc<Mutex<Session>>,
     pub decoder_joint: Arc<Mutex<Session>>,
-    pub detokenizer: TdtDetokenizer,
-    pub durations: Vec<usize>,
+    pub tokenizer: TdtTokenizer,
 }
 
 impl TdtModel {
+    /// TDT model mel-spectrogram extractor (128 mel features).
+    pub const MEL_SPECTOGRAM: MelSpectrogram = MelSpectrogram {
+        n_mels: 128,
+        hop_length: 160,
+        n_fft: 512,
+        preemphasis: 0.97,
+        sample_rate: 16000,
+        win_length: 400,
+    };
+
     /// TDT encoder subsampling factor (8x).
     ///
     /// The encoder downsamples the mel-spectrogram by a factor of 8,
     /// producing one encoder frame for every 8 mel frames.
     pub const SUBSAMPLING_FACTOR: usize = 8;
 
+    /// Duration prediction values for TDT decoder.
+    ///
+    /// The decoder predicts how many encoder frames to skip for each token.
+    /// Values represent the number of frames to advance (0-4).
+    pub const DURATIONS: [usize; 5] = [0, 1, 2, 3, 4];
+
+    /// Maximum number of tokens to emit per encoder frame.
+    ///
+    /// Limits consecutive token predictions within a single frame to prevent
+    /// infinite loops during greedy decoding.
+    pub const MAX_TOKENS_PER_FRAME: usize = 10;
+
     /// Create a new TDT model instance.
-    pub fn new(
-        mel: MelSpectrogram,
-        encoder: Session,
-        decoder_joint: Session,
-        detokenizer: TdtDetokenizer,
-    ) -> Self {
+    pub fn new(encoder: Session, decoder_joint: Session, detokenizer: TdtTokenizer) -> Self {
         Self {
-            mel,
             encoder: Arc::new(Mutex::new(encoder)),
             decoder_joint: Arc::new(Mutex::new(decoder_joint)),
-            detokenizer,
-            durations: vec![0, 1, 2, 3, 4],
+            tokenizer: detokenizer,
         }
     }
 
@@ -66,7 +79,6 @@ impl TdtModel {
         let tokenizer_path = repo.resolve("tokenizer.json")?;
 
         let model = TdtModel::new(
-            MelSpectrogram::TDT,
             Self::load_encoder(&encoder_path, &session_builder)?,
             Self::load_decoder_joint(&decoder_path, &session_builder)?,
             Self::load_detokenizer(&tokenizer_path)?,
@@ -95,11 +107,11 @@ impl TdtModel {
 
     /// Load and create detokenizer.
     #[instrument(skip_all, fields(file=?file.display()))]
-    fn load_detokenizer(file: &Path) -> Result<TdtDetokenizer> {
+    fn load_detokenizer(file: &Path) -> Result<TdtTokenizer> {
         let tokenizer = Tokenizer::from_file(file)
             .map_err(|e| eyre!(e))
             .wrap_err("failed to load tokenizer")?;
 
-        Ok(TdtDetokenizer::new(tokenizer))
+        Ok(TdtTokenizer::new(tokenizer))
     }
 }
