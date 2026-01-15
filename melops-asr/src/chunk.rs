@@ -2,8 +2,8 @@
 
 use std::ops::Range;
 
-/// Default chunk duration in seconds (4 minutes)
-pub const DEFAULT_CHUNK_DURATION: f32 = 240.0;
+/// Default chunk duration in seconds (1 minute)
+pub const DEFAULT_CHUNK_DURATION: f32 = 60.0;
 
 /// Default chunk overlap in seconds
 pub const DEFAULT_CHUNK_OVERLAP: f32 = 1.0;
