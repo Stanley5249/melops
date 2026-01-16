@@ -11,29 +11,21 @@ use ort::value::Tensor;
 use tracing::instrument;
 
 /// Encoder outputs and sequence lengths.
-pub(super) struct TdtEncoderOutputs {
+pub(super) struct EncoderResponse {
     /// Encoder outputs (shape: (1, encoder_dim, time_steps)).
-    encoder_outputs: Tensor<f32>,
+    encoder_frames: Tensor<f32>,
     /// Encoded sequence lengths.
     encoded_lengths: Tensor<i64>,
 }
 
 /// Decoder-joint outputs.
-struct TdtDecoderJointOutputs {
+struct DecoderResponse {
     /// Logits (shape: (1, time, 1, vocab_size + num_durations)).
-    outputs: Tensor<f32>,
+    logits: Tensor<f32>,
     /// LSTM state 1.
-    output_states_1: Tensor<f32>,
+    states_1: Tensor<f32>,
     /// LSTM state 2.
-    output_states_2: Tensor<f32>,
-}
-
-/// Decoded token and duration.
-struct DecodedOutput {
-    /// Token ID.
-    token_id: usize,
-    /// Duration (frames to skip).
-    duration: usize,
+    states_2: Tensor<f32>,
 }
 
 /// Decoder state.
@@ -50,7 +42,7 @@ struct DecoderState {
 
 impl TdtModel {
     #[instrument(skip_all)]
-    pub(super) async fn encode(&self, audio_signal: Array2<f32>) -> Result<TdtEncoderOutputs> {
+    pub(super) async fn encode(&self, audio_signal: Array2<f32>) -> Result<EncoderResponse> {
         let time_steps = audio_signal.dim().0;
         let audio_lengths = Tensor::from_array(([1_usize], vec![time_steps as i64]))?;
 
@@ -70,7 +62,7 @@ impl TdtModel {
 
         let mut outputs = encoder_guard.run_async(inputs, &options)?.await?;
 
-        let encoder_outputs = outputs
+        let encoder_frames = outputs
             .remove("outputs")
             .ok_or_else(|| ModelError::missing_output("outputs"))?
             .downcast()?;
@@ -80,8 +72,8 @@ impl TdtModel {
             .ok_or_else(|| ModelError::missing_output("encoded_lengths"))?
             .downcast()?;
 
-        Ok(TdtEncoderOutputs {
-            encoder_outputs,
+        Ok(EncoderResponse {
+            encoder_frames,
             encoded_lengths,
         })
     }
@@ -89,7 +81,7 @@ impl TdtModel {
     #[instrument(skip_all)]
     pub(super) async fn greedy_decode(
         &self,
-        values: TdtEncoderOutputs,
+        response: EncoderResponse,
     ) -> Result<Vec<TokenDuration>> {
         let decoder_options = RunOptions::new()?.with_tag("decoder_joint")?;
 
@@ -100,33 +92,31 @@ impl TdtModel {
             states_2: Tensor::from_array(Array3::<f32>::zeros((2, 1, 640)))?,
         };
 
-        let frames = values
-            .encoder_outputs
+        let frames = response
+            .encoder_frames
             .extract_array()
             .into_dimensionality::<Ix3>()?;
 
-        let encoded_length =
-            (values.encoded_lengths.extract_array()[0] as usize).min(frames.dim().2);
+        let encoded_length = (response.encoded_lengths[[0]] as usize).min(frames.dim().2);
 
         let mut tokens = Vec::new();
         let mut frame_index = 0;
 
         while frame_index < encoded_length {
-            let frame = frames
-                .slice_axis(Axis(2), (frame_index..frame_index + 1).into())
-                .into_owned();
-            let frame = Tensor::from_array(frame)?;
+            let slice = frame_index..frame_index + 1;
+
+            let frame = Tensor::from_array(frames.slice_axis(Axis(2), slice.into()).to_owned())?;
 
             frame_index = self
                 .label_loop(
                     frame_index,
-                    encoded_length,
                     &frame,
                     &mut state,
-                    &decoder_options,
                     &mut tokens,
+                    &decoder_options,
                 )
-                .await?;
+                .await?
+                .min(encoded_length);
         }
 
         Ok(tokens)
@@ -137,7 +127,7 @@ impl TdtModel {
         frame: &Tensor<f32>,
         state: &DecoderState,
         options: &RunOptions,
-    ) -> Result<TdtDecoderJointOutputs> {
+    ) -> Result<DecoderResponse> {
         let inputs = inputs![
             "encoder_outputs" => frame,
             "targets" => &state.target,
@@ -148,31 +138,31 @@ impl TdtModel {
 
         let mut decoder_guard = self.decoder_joint.lock().await;
 
-        let mut session_outputs = decoder_guard.run_async(inputs, options)?.await?;
+        let mut outputs = decoder_guard.run_async(inputs, options)?.await?;
 
-        let outputs = session_outputs
+        let logits = outputs
             .remove("outputs")
             .ok_or_else(|| ModelError::missing_output("outputs"))?
             .downcast()?;
 
-        let output_states_1 = session_outputs
+        let states_1 = outputs
             .remove("output_states_1")
             .ok_or_else(|| ModelError::missing_output("output_states_1"))?
             .downcast()?;
 
-        let output_states_2 = session_outputs
+        let states_2 = outputs
             .remove("output_states_2")
             .ok_or_else(|| ModelError::missing_output("output_states_2"))?
             .downcast()?;
 
-        Ok(TdtDecoderJointOutputs {
-            outputs,
-            output_states_1,
-            output_states_2,
+        Ok(DecoderResponse {
+            logits,
+            states_1,
+            states_2,
         })
     }
 
-    fn parse_logits(&self, logits: &Tensor<f32>) -> Result<DecodedOutput> {
+    fn parse_logits(&self, logits: &Tensor<f32>) -> Result<(usize, usize)> {
         let logits_view = logits.extract_array();
         let logits_flat = logits_view.flatten();
 
@@ -190,39 +180,34 @@ impl TdtModel {
             }
         })?;
 
-        Ok(DecodedOutput { token_id, duration })
+        Ok((token_id, duration))
     }
 
     async fn label_loop(
         &self,
-        mut frame_index: usize,
-        encoded_length: usize,
+        frame_index: usize,
         frame: &Tensor<f32>,
         state: &mut DecoderState,
-        decoder_options: &RunOptions,
         tokens: &mut Vec<TokenDuration>,
+        decoder_options: &RunOptions,
     ) -> Result<usize> {
         for _ in 0..Self::MAX_TOKENS_PER_FRAME {
-            let decoder_outputs = self.decode(frame, state, decoder_options).await?;
+            let response = self.decode(frame, state, decoder_options).await?;
 
-            let decoded = self.parse_logits(&decoder_outputs.outputs)?;
+            let (token_id, duration) = self.parse_logits(&response.logits)?;
 
-            let skip = decoded.duration;
-
-            if decoded.token_id != self.tokenizer.blank_id {
+            if token_id != self.tokenizer.blank_id {
                 // With fresh allocations, we can use direct assignment
-                state.states_1 = decoder_outputs.output_states_1;
-                state.states_2 = decoder_outputs.output_states_2;
+                state.states_1 = response.states_1;
+                state.states_2 = response.states_2;
 
-                tokens.push(TokenDuration::new(decoded.token_id, frame_index, skip));
+                tokens.push(TokenDuration::new(token_id, frame_index, duration));
 
-                state.target[[0, 0]] = decoded.token_id as i32;
+                state.target[[0, 0]] = token_id as i32;
             }
 
-            frame_index = encoded_length.min(frame_index + skip);
-
-            if skip != 0 {
-                return Ok(frame_index);
+            if duration != 0 {
+                return Ok(frame_index + duration);
             }
         }
 

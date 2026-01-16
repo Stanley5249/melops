@@ -3,15 +3,15 @@
 use crate::cli::{CaptionArgs, ModelArgs};
 use crate::config::ModelConfig;
 use crate::segment::Segmenter;
-use crate::srt::{self, display_subtitles};
+use crate::srt::{self, display_subtitles, to_subtitles};
 use clap::Args;
-use eyre::{Context, Result};
+use eyre::{Context, Ok, Result};
 use melops_asr::audio::read_audio_mono;
 use melops_asr::chunk::ChunkConfig;
 use melops_asr::models::tdt::core::TdtModel;
 use melops_asr::traits::AsrModel;
-use srtlib::Subtitle;
-use std::path::{Path, PathBuf};
+use melops_asr::types::Segment;
+use std::path::PathBuf;
 use tokio::runtime::Builder;
 
 /// CLI arguments for caption generation.
@@ -69,7 +69,19 @@ pub fn execute(config: CapConfig) -> Result<()> {
         "generating captions"
     );
 
-    let subtitles = caption_from_wav_file(&config.path, config.model_config, config.chunk_config)?;
+    let audio = read_audio_mono(&config.path)
+        .wrap_err_with(|| format!("failed to load audio: {:?}", config.path.display()))?;
+
+    let segments = Builder::new_current_thread().build()?.block_on(transcribe(
+        audio,
+        config.model_config,
+        config.chunk_config,
+    ))?;
+
+    // Regroup segments for comfortable speed
+    let segments = Segmenter::COMFORTABLE.regroup(&segments);
+
+    let subtitles = to_subtitles(&segments);
 
     tracing::info!(path = ?output.display(), "write srt file");
 
@@ -86,26 +98,16 @@ pub fn execute(config: CapConfig) -> Result<()> {
 }
 
 /// Perform ASR on WAV file and return captions as subtitles.
-fn caption_from_wav_file(
-    wav_path: &Path,
+async fn transcribe(
+    audio: Vec<f32>,
     model_config: ModelConfig,
     chunk_config: ChunkConfig,
-) -> Result<Vec<Subtitle>> {
-    let audio = read_audio_mono(wav_path)
-        .wrap_err_with(|| format!("failed to load audio: {:?}", wav_path.display()))?;
-
+) -> Result<Vec<Segment>> {
     let builder = crate::ort::build_session()?;
+
     let model = TdtModel::from_repo(&model_config.repo, builder)?;
 
-    let segments = Builder::new_current_thread()
-        .build()?
-        .block_on(model.transcribe_chunked(&audio, chunk_config))
-        .wrap_err("transcription failed")?;
+    let segments = model.transcribe_chunked(&audio, chunk_config).await?;
 
-    // Regroup segments for comfortable speed
-    let segments = Segmenter::COMFORTABLE.regroup(&segments);
-
-    let subtitles = srt::to_subtitles(&segments);
-
-    Ok(subtitles)
+    Ok(segments)
 }

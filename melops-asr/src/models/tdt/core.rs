@@ -53,11 +53,11 @@ impl TdtModel {
     pub const MAX_TOKENS_PER_FRAME: usize = 10;
 
     /// Create a new TDT model instance.
-    pub fn new(encoder: Session, decoder_joint: Session, detokenizer: TdtTokenizer) -> Self {
+    pub fn new(encoder: Session, decoder_joint: Session, tokenizer: TdtTokenizer) -> Self {
         Self {
             encoder: Arc::new(Mutex::new(encoder)),
             decoder_joint: Arc::new(Mutex::new(decoder_joint)),
-            tokenizer: detokenizer,
+            tokenizer,
         }
     }
 
