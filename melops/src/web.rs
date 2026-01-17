@@ -8,6 +8,7 @@ use crate::dl::{DownloadConfig, download};
 use clap::Args;
 use eyre::{Result, eyre};
 use std::path::PathBuf;
+use std::usize;
 
 #[derive(Args, Debug)]
 pub struct WebCommand {
@@ -17,6 +18,10 @@ pub struct WebCommand {
     /// Extract and display URLs only, without downloading or processing
     #[arg(long)]
     pub dry_run: bool,
+
+    /// Process only the first N URLs
+    #[arg(long)]
+    pub limit: Option<usize>,
 
     #[command(flatten)]
     pub download_args: DownloadArgs,
@@ -88,9 +93,7 @@ pub async fn run(command: WebCommand) -> Result<()> {
     // Fetch YouTube URLs
     let youtube_urls = fetch_page_urls(&web_config.page_url, &mut cache)?;
 
-    tracing::info!(count = youtube_urls.len(), "processing youtube urls");
-
-    // If dry run, output URLs and exit
+    // If dry run, output all URLs and exit
     if command.dry_run {
         for url in &youtube_urls {
             println!("{}", url);
@@ -98,14 +101,19 @@ pub async fn run(command: WebCommand) -> Result<()> {
         return Ok(());
     }
 
+    // Apply limit for processing
+    let count = command.limit.unwrap_or(usize::MAX).min(youtube_urls.len());
+
+    tracing::info!(count, "processing youtube urls");
+
     // Load model once for all videos
     let model = model_config.load()?;
 
     // Process each video
-    for (i, youtube_url) in youtube_urls.iter().enumerate() {
+    for (i, youtube_url) in youtube_urls.iter().take(count).enumerate() {
         tracing::info!(
             current = i + 1,
-            total = youtube_urls.len(),
+            total = count,
             url = %youtube_url,
             "processing video"
         );
@@ -143,6 +151,7 @@ mod tests {
         let cmd = WebCommand {
             url: "https://example.com/course".to_string(),
             dry_run: false,
+            limit: None,
             download_args: DownloadArgs { output_dir: None },
             model_args: ModelArgs {
                 model_id: "test_model".to_string(),
