@@ -34,12 +34,13 @@ fn init_tracing() -> Result<WorkerGuard> {
     Ok(guard)
 }
 
-fn main() -> Result<()> {
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<()> {
     color_eyre::install()?;
 
     let _guard = init_tracing()?;
 
     melops::ort::init()?;
 
-    run(Cli::parse())
+    run(Cli::parse()).await
 }

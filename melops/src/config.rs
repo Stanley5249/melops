@@ -7,6 +7,7 @@ use crate::cli::{ModelArgs, ModelSource};
 use eyre::Result;
 use hf_hub::Cache;
 use hf_hub::api::sync::Api;
+use melops_asr::models::tdt::core::TdtModel;
 use melops_asr::types::ModelRepo;
 use std::path::PathBuf;
 
@@ -39,5 +40,13 @@ impl TryFrom<ModelArgs> for ModelConfig {
         };
 
         Ok(Self { repo })
+    }
+}
+
+impl ModelConfig {
+    /// Load TDT model with ONNX Runtime session
+    pub fn load(&self) -> Result<TdtModel> {
+        let builder = crate::ort::build_session()?;
+        TdtModel::from_repo(&self.repo, builder)
     }
 }

@@ -1,14 +1,14 @@
 //! Dl subcommand - download and generate captions from audio URL.
 
-use crate::cap::CapConfig;
-use crate::cli::{CaptionArgs, ModelArgs};
+use crate::cache::Cache;
+use crate::cap::{CapConfig, caption};
+use crate::cli::{CacheArgs, CacheConfig, CaptionArgs, DownloadArgs, ModelArgs};
 use crate::config::ModelConfig;
 use clap::Args;
 use color_eyre::Section;
-use eyre::{Context, OptionExt, Result, eyre};
-use melops_asr::chunk::ChunkConfig;
+use eyre::{OptionExt, Result, WrapErr, eyre};
 use melops_dl::asr::AudioFormat;
-use melops_dl::dl::{DownloadOptions, download};
+use melops_dl::dl::DownloadOptions;
 use std::path::PathBuf;
 
 /// CLI arguments for download and caption generation.
@@ -17,85 +17,110 @@ pub struct DlCommand {
     /// URL to download
     pub url: String,
 
-    /// Output directory (default: system download directory)
-    #[arg(short, long)]
-    pub output: Option<PathBuf>,
+    #[command(flatten)]
+    pub download_args: DownloadArgs,
 
     #[command(flatten)]
     pub model_args: ModelArgs,
 
     #[command(flatten)]
     pub caption_args: CaptionArgs,
+
+    #[command(flatten)]
+    pub cache_args: CacheArgs,
 }
 
-/// Resolved configuration for download and caption generation.
+/// Validated download configuration.
 #[derive(Debug)]
-pub struct DlConfig {
+pub struct DownloadConfig {
     pub url: String,
     pub output_dir: Option<PathBuf>,
-    pub model_config: ModelConfig,
-    pub preview: bool,
-    pub chunk_config: ChunkConfig,
 }
 
-impl TryFrom<DlCommand> for DlConfig {
-    type Error = eyre::Error;
-
-    fn try_from(args: DlCommand) -> Result<Self> {
-        Ok(Self {
-            url: args.url,
-            output_dir: args.output,
-            model_config: args.model_args.try_into()?,
-            preview: args.caption_args.preview,
-            chunk_config: args.caption_args.chunk_args.into(),
-        })
+impl DownloadConfig {
+    /// Transform to application state (DownloadOptions)
+    pub fn to_options(&self) -> DownloadOptions {
+        let mut opts: DownloadOptions = AudioFormat::Pcm16.into();
+        if let Some(dir) = &self.output_dir {
+            opts.paths = Some(opts.paths.expect("paths should be some").with_home(dir));
+        }
+        opts
     }
 }
 
-pub fn execute(config: DlConfig) -> Result<()> {
-    tracing::info!(url = config.url, "downloading audio");
-
-    let mut opts: DownloadOptions = AudioFormat::Pcm16.into();
-
-    // Override output directory if provided
-    if let Some(home) = config.output_dir.as_deref() {
-        opts.paths = Some(opts.paths.expect("paths should be some").with_home(home));
+/// Download audio from URL and update cache
+pub fn download(config: &DownloadConfig, cache: &mut Cache) -> Result<PathBuf> {
+    // Check cache first
+    if let Some(audio_path) = cache.get_audio_path(&config.url) {
+        if audio_path.exists() {
+            tracing::info!(path = ?audio_path.display(), "using cached audio");
+            return Ok(audio_path.to_path_buf());
+        }
+        tracing::info!(
+            path = ?audio_path.display(),
+            "cached audio file not found, re-downloading"
+        );
     }
 
-    // Download audio
-    let (file_path, _info) = download(&config.url, opts).wrap_err("failed to download audio")?;
+    tracing::info!(url = %config.url, "downloading audio");
 
-    // Get actual downloaded file path from post_hook
+    let options = config.to_options();
+
+    let (file_path, _info) =
+        melops_dl::dl::download(&config.url, options).wrap_err("failed to download audio")?;
+
     let audio_path = file_path.ok_or_eyre("yt-dlp did not return downloaded file path")?;
 
     // Verify file exists
     if !audio_path.exists() {
-        let e = eyre!(
-            "audio downloaded but file not found at expected location: {:?}",
+        return Err(eyre!(
+            "audio downloaded but file not found: {:?}",
             audio_path.display()
-        )
-        .suggestion(format!("mel cap {:?}", audio_path.display()));
-        return Err(e);
+        ));
     }
+
+    tracing::info!(downloaded = ?audio_path.display(), "audio downloaded");
+
+    // Update cache
+    cache.set_audio_path(config.url.clone(), audio_path.clone())?;
+
+    Ok(audio_path)
+}
+
+/// Entry point for dl command
+pub async fn run(command: DlCommand) -> Result<()> {
+    // Validate command into configs
+    let download_config = DownloadConfig {
+        url: command.url,
+        output_dir: command.download_args.output_dir,
+    };
+
+    let model_config = ModelConfig::try_from(command.model_args)?;
+
+    // Load cache (application state)
+    let cache_config = CacheConfig::from(command.cache_args);
+    let mut cache = Cache::load(cache_config)?;
+
+    // Download
+    let audio_path = download(&download_config, &mut cache)?;
 
     tracing::info!(
         downloaded = ?audio_path.display(),
         "audio downloaded, starting captioning"
     );
 
-    // Generate SRT path (same directory and name as audio, but .srt extension)
-    let srt_path = audio_path.with_extension("srt");
-
-    // Generate captions using cap module's logic
+    // Create caption config
     let cap_config = CapConfig {
         path: audio_path.clone(),
-        output: srt_path,
-        model_config: config.model_config,
-        preview: config.preview,
-        chunk_config: config.chunk_config,
+        output: audio_path.with_extension("srt"),
+        preview: command.caption_args.preview,
+        chunk_config: command.caption_args.chunk_args.into(),
     };
 
-    crate::cap::execute(cap_config)
+    // Load model and caption
+    let model = model_config.load()?;
+    caption(&cap_config, &model, &mut cache)
+        .await
         .with_note(|| {
             format!(
                 "audio downloaded successfully to: {:?}",

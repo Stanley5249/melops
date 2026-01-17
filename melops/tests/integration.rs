@@ -5,9 +5,9 @@ use melops::cli::{Cli, run};
 
 const URL: &str = "https://youtu.be/jNQXAC9IVRw";
 
-#[test]
+#[tokio::test(flavor = "current_thread")]
 #[ignore = "network I/O and model download required"]
-fn dl_downloads_and_transcribes() {
+async fn dl_downloads_and_transcribes() {
     let temp_dir = std::env::temp_dir().join("melops-test");
 
     // Clean up previous test run
@@ -18,7 +18,7 @@ fn dl_downloads_and_transcribes() {
 
     let cli = Cli::parse_from(["mel", "dl", URL, "-o", temp_dir.to_str().unwrap()]);
 
-    run(cli).expect("failed to download and transcribe");
+    run(cli).await.expect("failed to download and transcribe");
 
     // Verify SRT file was created
     // Expected path: temp_dir/Youtube/jawed/jNQXAC9IVRw/Me_at_the_zoo.srt

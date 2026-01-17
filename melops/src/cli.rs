@@ -1,10 +1,13 @@
 //! CLI argument definitions using clap.
+//! CLI argument parsing and command execution.
 
 use crate::cap::CapCommand;
 use crate::dl::DlCommand;
+use crate::web::WebCommand;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use eyre::Result;
 use melops_asr::chunk::{ChunkConfig, DEFAULT_CHUNK_DURATION, DEFAULT_CHUNK_OVERLAP};
+use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[command(name = "mel")]
@@ -22,6 +25,9 @@ pub enum Commands {
 
     /// Download and generate captions from audio URL
     Dl(DlCommand),
+
+    /// Scrape web page for YouTube URLs and batch process
+    Web(WebCommand),
 }
 
 /// Model source type selection.
@@ -51,7 +57,7 @@ pub struct ModelArgs {
 }
 
 /// CLI arguments for chunk configuration.
-#[derive(Args, Clone, Copy, Debug)]
+#[derive(Args, Clone, Copy, Debug, Default)]
 pub struct ChunkArgs {
     /// Chunk duration in seconds for long audio
     #[arg(long, default_value_t = DEFAULT_CHUNK_DURATION)]
@@ -88,13 +94,62 @@ pub struct CaptionArgs {
     pub chunk_args: ChunkArgs,
 }
 
+/// CLI arguments for cache configuration.
+#[derive(Args, Clone, Debug, Default)]
+pub struct CacheArgs {
+    /// Cache directory (default: system cache directory)
+    #[arg(long)]
+    pub cache_dir: Option<PathBuf>,
+
+    /// Refresh cached web page URLs
+    #[arg(long)]
+    pub refresh_pages: bool,
+
+    /// Refresh cached audio files
+    #[arg(long)]
+    pub refresh_audio: bool,
+
+    /// Refresh cached SRT files
+    #[arg(long)]
+    pub refresh_srt: bool,
+}
+
+/// Validated cache configuration.
+#[derive(Clone, Debug)]
+pub struct CacheConfig {
+    pub cache_dir: Option<PathBuf>,
+    pub refresh_pages: bool,
+    pub refresh_audio: bool,
+    pub refresh_srt: bool,
+}
+
+impl From<CacheArgs> for CacheConfig {
+    fn from(args: CacheArgs) -> Self {
+        Self {
+            cache_dir: args.cache_dir,
+            refresh_pages: args.refresh_pages,
+            refresh_audio: args.refresh_audio,
+            refresh_srt: args.refresh_srt,
+        }
+    }
+}
+
+/// CLI arguments for download configuration.
+#[derive(Args, Clone, Debug, Default)]
+pub struct DownloadArgs {
+    /// Output directory for downloaded audio (default: system download directory)
+    #[arg(short, long)]
+    pub output_dir: Option<PathBuf>,
+}
+
 /// Execute CLI command - separated for testing.
-pub fn run(cli: Cli) -> Result<()> {
+pub async fn run(cli: Cli) -> Result<()> {
     tracing::debug!(?cli, "parsed arguments");
 
     match cli.command {
-        Commands::Cap(args) => crate::cap::execute(args.try_into()?),
-        Commands::Dl(args) => crate::dl::execute(args.try_into()?),
+        Commands::Cap(args) => crate::cap::run(args).await,
+        Commands::Dl(args) => crate::dl::run(args).await,
+        Commands::Web(args) => crate::web::run(args).await,
     }
 }
 
@@ -148,7 +203,9 @@ mod tests {
 
         match &cli.command {
             Commands::Dl(crate::dl::DlCommand {
-                url, output: None, ..
+                url,
+                download_args: DownloadArgs { output_dir: None },
+                ..
             }) if url == "https://example.com/video" => {}
             _ => panic!("unexpected command: {:?}", cli.command),
         }
@@ -169,9 +226,13 @@ mod tests {
         match &cli.command {
             Commands::Dl(crate::dl::DlCommand {
                 url,
-                output: Some(output),
+                download_args:
+                    DownloadArgs {
+                        output_dir: Some(output_dir),
+                    },
                 ..
-            }) if url == "https://example.com/video" && output.to_str() == Some("/tmp/output") => {}
+            }) if url == "https://example.com/video"
+                && output_dir.to_str() == Some("/tmp/output") => {}
             _ => panic!("unexpected command: {:?}", cli.command),
         }
     }
