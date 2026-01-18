@@ -7,8 +7,8 @@ use crate::config::ModelConfig;
 use crate::dl::{DownloadConfig, download};
 use clap::Args;
 use eyre::{Result, eyre};
+use futures::stream::{self, StreamExt, TryStreamExt};
 use std::path::PathBuf;
-use std::usize;
 
 #[derive(Args, Debug)]
 pub struct WebCommand {
@@ -44,7 +44,7 @@ pub struct WebConfig {
 }
 
 /// Fetch and extract YouTube URLs from page, update cache
-fn fetch_page_urls(page_url: &str, cache: &mut Cache) -> Result<Vec<String>> {
+async fn fetch_page_urls(page_url: &str, cache: &mut Cache) -> Result<Vec<String>> {
     // Check cache first
     if let Some(urls) = cache.get_page_urls(page_url) {
         tracing::info!(count = urls.len(), "using cached youtube urls");
@@ -61,14 +61,16 @@ fn fetch_page_urls(page_url: &str, cache: &mut Cache) -> Result<Vec<String>> {
         return Err(eyre!("no youtube urls found on page: {}", page_url));
     }
 
-    tracing::info!(count = urls.len(), "found youtube urls");
+    tracing::info!(count = urls.len(), "resolving youtube urls");
 
-    let mut resolved_urls = Vec::with_capacity(urls.len());
-    for url in &urls {
-        tracing::debug!(url = %url, "resolving url");
-        let resolved = melops_web::resolve_url(url)?;
-        resolved_urls.push(resolved);
-    }
+    let resolved_urls: Vec<String> = stream::iter(&urls)
+        .map(|url| async move {
+            tracing::debug!(url = %url, "resolving url");
+            melops_web::resolve_url(url).await
+        })
+        .buffer_unordered(64)
+        .try_collect()
+        .await?;
 
     // Update cache
     cache.set_page_urls(page_url.to_string(), resolved_urls.clone());
@@ -91,7 +93,7 @@ pub async fn run(command: WebCommand) -> Result<()> {
     let mut cache = Cache::load(cache_config)?;
 
     // Fetch YouTube URLs
-    let youtube_urls = fetch_page_urls(&web_config.page_url, &mut cache)?;
+    let youtube_urls = fetch_page_urls(&web_config.page_url, &mut cache).await?;
 
     // If dry run, output all URLs and exit
     if command.dry_run {

@@ -14,18 +14,18 @@ use crate::Result;
 /// # Examples
 ///
 /// ```no_run
-/// use melops_web::resolve_url;
-///
-/// let resolved = resolve_url("https://youtu.be/dQw4w9WgXcQ")?;
+/// # use melops_web::resolve_url;
+/// # tokio::runtime::Runtime::new().unwrap().block_on(async {
+/// let resolved = resolve_url("https://youtu.be/dQw4w9WgXcQ").await.unwrap();
 /// assert!(resolved.contains("youtube.com/watch"));
-/// # Ok::<(), melops_web::Error>(())
+/// # });
 /// ```
-pub fn resolve_url(url: &str) -> Result<String> {
-    let client = reqwest::blocking::Client::builder()
+pub async fn resolve_url(url: &str) -> Result<String> {
+    let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(10))
         .build()?;
 
-    match client.head(url).send() {
+    match client.head(url).send().await {
         Ok(response) => Ok(response.url().to_string()),
         Err(_) => {
             // Fallback to original URL if HTTP fails
@@ -38,26 +38,26 @@ pub fn resolve_url(url: &str) -> Result<String> {
 mod tests {
     use super::*;
 
-    #[test]
+    #[tokio::test]
     #[ignore = "network I/O"]
-    fn resolves_short_url() {
-        let resolved = resolve_url("https://youtu.be/dQw4w9WgXcQ").unwrap();
+    async fn resolves_short_url() {
+        let resolved = resolve_url("https://youtu.be/dQw4w9WgXcQ").await.unwrap();
         assert!(resolved.contains("youtube.com"));
     }
 
-    #[test]
+    #[tokio::test]
     #[ignore = "network I/O"]
-    fn resolves_canonical_url() {
+    async fn resolves_canonical_url() {
         let url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
-        let resolved = resolve_url(url).unwrap();
+        let resolved = resolve_url(url).await.unwrap();
         assert_eq!(resolved, url);
     }
 
-    #[test]
+    #[tokio::test]
     #[ignore = "network I/O"]
-    fn handles_invalid_url() {
+    async fn handles_invalid_url() {
         let url = "https://invalid.example.com/nonexistent";
-        let resolved = resolve_url(url).unwrap();
+        let resolved = resolve_url(url).await.unwrap();
         // Falls back to original on error
         assert_eq!(resolved, url);
     }
