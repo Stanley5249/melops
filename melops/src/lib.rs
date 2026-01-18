@@ -3,6 +3,7 @@ pub mod cap;
 pub mod cli;
 pub mod config;
 pub mod dl;
+pub mod index;
 pub mod ort;
 pub mod segment;
 pub mod srt;

@@ -1,8 +1,8 @@
 //! Cap subcommand - generate captions from audio file to SRT.
 
-use crate::cache::Cache;
-use crate::cli::{CacheArgs, CacheConfig, CaptionArgs, ModelArgs};
+use crate::cli::{CacheArgs, CaptionArgs, IndexArgs, ModelArgs};
 use crate::config::ModelConfig;
+use crate::index::ArtifactCache;
 use crate::segment::Segmenter;
 use crate::srt::{display_subtitles, preview_subtitles, to_subtitles};
 use clap::Args;
@@ -24,75 +24,82 @@ pub struct CapCommand {
     pub output: Option<PathBuf>,
 
     #[command(flatten)]
-    pub model_args: ModelArgs,
+    pub cache_args: CacheArgs,
 
     #[command(flatten)]
     pub caption_args: CaptionArgs,
 
     #[command(flatten)]
-    pub cache_args: CacheArgs,
+    pub index_args: IndexArgs,
+
+    #[command(flatten)]
+    pub model_args: ModelArgs,
 }
 
 /// Validated configuration for caption generation.
 #[derive(Debug)]
 pub struct CapConfig {
-    pub path: PathBuf,
-    pub output: PathBuf,
+    pub audio_path: PathBuf,
+    pub output_path: PathBuf,
     pub preview: bool,
     pub chunk_config: ChunkConfig,
 }
 
-/// Generate captions with pre-loaded model and update cache
-pub async fn caption(config: &CapConfig, model: &TdtModel, cache: &mut Cache) -> Result<()> {
-    let cache_key = config.path.to_string_lossy();
+/// Generate captions with pre-loaded model and cache index
+pub async fn caption(
+    config: &CapConfig,
+    model: &TdtModel,
+    index: &mut ArtifactCache,
+) -> Result<()> {
+    // Get cache key
+    let cache_key = config
+        .audio_path
+        .canonicalize()?
+        .to_string_lossy()
+        .into_owned();
 
-    // Check cache for existing SRT (respects refresh_srt flag)
-    if let Some(srt_path) = cache.get_srt_path(&cache_key) {
-        tracing::info!(path = ?srt_path.display(), "srt file already exists in cache");
-        return Ok(());
-    }
+    // Access SRT path from cache or generate new one
+    let srt_path = index
+        .ensure_srt(cache_key, || async {
+            // Load audio
+            let audio = read_audio_mono(&config.audio_path).wrap_err_with(|| {
+                format!("failed to load audio: {:?}", config.audio_path.display())
+            })?;
 
-    // Check if output exists on disk (only when not refreshing)
-    if !cache.refresh_srt && config.output.exists() {
-        tracing::info!(path = ?config.output.display(), "srt file already exists");
-        // Update cache
-        cache.set_srt_path(cache_key.to_string(), config.output.clone())?;
-        return Ok(());
-    }
+            // Transcribe
+            let segments = model
+                .transcribe_chunked(&audio, config.chunk_config)
+                .await
+                .wrap_err("transcription failed")?;
 
-    tracing::info!(
-        input = ?config.path.display(),
-        output = ?config.output.display(),
-        "generating captions"
-    );
+            // Regroup segments for comfortable speed
+            let segments = Segmenter::COMFORTABLE.regroup(&segments);
 
-    // Load audio
-    let audio = read_audio_mono(&config.path)
-        .wrap_err_with(|| format!("failed to load audio: {:?}", config.path.display()))?;
+            // Convert to subtitles
+            let subtitles = to_subtitles(&segments);
 
-    // Transcribe
-    let segments = model
-        .transcribe_chunked(&audio, config.chunk_config)
-        .await
-        .wrap_err("transcription failed")?;
+            // Write SRT file
+            tracing::info!(path = ?config.output_path.display(), "write srt file");
 
-    // Regroup segments for comfortable speed
-    let segments = Segmenter::COMFORTABLE.regroup(&segments);
+            std::fs::write(&config.output_path, display_subtitles(&subtitles)).wrap_err_with(
+                || format!("failed to write srt: {:?}", config.output_path.display()),
+            )?;
 
-    // Convert to subtitles
-    let subtitles = to_subtitles(&segments);
+            // Canonicalize output path
+            Ok(config.output_path.canonicalize()?)
+        })
+        .await?;
 
-    // Write SRT file
-    tracing::info!(path = ?config.output.display(), "write srt file");
-    std::fs::write(&config.output, display_subtitles(&subtitles))
-        .wrap_err_with(|| format!("failed to write srt: {:?}", config.output.display()))?;
-
-    // Update cache
-    cache.set_srt_path(cache_key.to_string(), config.output.clone())?;
-
-    // Preview
+    // Preview if requested
     if config.preview {
-        print!("{}", preview_subtitles(&subtitles, 2, 2));
+        // Read subtitles from file
+        let content = std::fs::read_to_string(srt_path)
+            .wrap_err_with(|| format!("failed to read srt: {:?}", srt_path.display()))?;
+
+        let subtitles =
+            srtlib::Subtitles::parse_from_str(content).wrap_err("failed to parse srt")?;
+
+        print!("{}", preview_subtitles(&subtitles.to_vec(), 2, 2));
     }
 
     Ok(())
@@ -101,25 +108,27 @@ pub async fn caption(config: &CapConfig, model: &TdtModel, cache: &mut Cache) ->
 /// Entry point for cap command
 pub async fn run(command: CapCommand) -> Result<()> {
     // Validate command into configs
-    let path = command.path;
-    let output = command.output.unwrap_or_else(|| path.with_extension("srt"));
+    let audio_path = command.path;
+    let output_path = command
+        .output
+        .unwrap_or_else(|| audio_path.with_extension("srt"));
 
     let model_config = ModelConfig::try_from(command.model_args)?;
+    let cache_dir = command.cache_args.try_into()?;
 
     let cap_config = CapConfig {
-        path,
-        output,
+        audio_path,
+        output_path,
         preview: command.caption_args.preview,
         chunk_config: command.caption_args.chunk_args.try_into()?,
     };
 
-    // Load cache (application state)
-    let cache_config = CacheConfig::from(command.cache_args);
-    let mut cache = Cache::load(cache_config)?;
+    // Load index
+    let mut index = ArtifactCache::load(cache_dir, command.index_args)?;
 
     // Load model
     let model = model_config.load()?;
 
     // Generate captions
-    caption(&cap_config, &model, &mut cache).await
+    caption(&cap_config, &model, &mut index).await
 }

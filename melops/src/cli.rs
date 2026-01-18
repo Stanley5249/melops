@@ -4,6 +4,7 @@
 use crate::cache::CacheCommand;
 use crate::cap::CapCommand;
 use crate::dl::DlCommand;
+use crate::index::CacheStrategy;
 use crate::web::WebCommand;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use eyre::Result;
@@ -100,44 +101,28 @@ pub struct CaptionArgs {
     pub chunk_args: ChunkArgs,
 }
 
-/// CLI arguments for cache configuration.
+/// CLI arguments for cache directory configuration.
 #[derive(Args, Clone, Debug, Default)]
 pub struct CacheArgs {
     /// Cache directory (default: system cache directory)
     #[arg(long)]
     pub cache_dir: Option<PathBuf>,
-
-    /// Refresh cached web page URLs
-    #[arg(long)]
-    pub refresh_pages: bool,
-
-    /// Refresh cached audio files
-    #[arg(long)]
-    pub refresh_audio: bool,
-
-    /// Refresh cached SRT files
-    #[arg(long)]
-    pub refresh_srt: bool,
 }
 
-/// Validated cache configuration.
-#[derive(Clone, Debug)]
-pub struct CacheConfig {
-    pub cache_dir: Option<PathBuf>,
-    pub refresh_pages: bool,
-    pub refresh_audio: bool,
-    pub refresh_srt: bool,
-}
+/// CLI arguments for index cache operations.
+#[derive(Args, Clone, Copy, Debug, Default)]
+pub struct IndexArgs {
+    /// Cache operation for web page URLs
+    #[arg(long, value_enum, default_value_t = CacheStrategy::GetOrInsert)]
+    pub cache_pages: CacheStrategy,
 
-impl From<CacheArgs> for CacheConfig {
-    fn from(args: CacheArgs) -> Self {
-        Self {
-            cache_dir: args.cache_dir,
-            refresh_pages: args.refresh_pages,
-            refresh_audio: args.refresh_audio,
-            refresh_srt: args.refresh_srt,
-        }
-    }
+    /// Cache operation for audio files
+    #[arg(long, value_enum, default_value_t = CacheStrategy::GetOrInsert)]
+    pub cache_audio: CacheStrategy,
+
+    /// Cache operation for SRT files
+    #[arg(long, value_enum, default_value_t = CacheStrategy::GetOrInsert)]
+    pub cache_srt: CacheStrategy,
 }
 
 /// CLI arguments for download configuration.
@@ -170,7 +155,10 @@ mod tests {
 
         match &cli.command {
             Commands::Cap(crate::cap::CapCommand {
-                path, output: None, ..
+                path,
+                output: None,
+                cache_args: CacheArgs { cache_dir: None },
+                ..
             }) if path.to_str() == Some("audio.wav") => {}
             _ => panic!("unexpected command: {:?}", cli.command),
         }
@@ -192,6 +180,7 @@ mod tests {
             Commands::Cap(crate::cap::CapCommand {
                 path,
                 output: Some(output),
+                cache_args: CacheArgs { cache_dir: None },
                 ..
             }) if path.to_str() == Some("audio.wav") && output.to_str() == Some("output.srt") => {}
             _ => panic!("unexpected command: {:?}", cli.command),
@@ -212,6 +201,7 @@ mod tests {
             Commands::Dl(crate::dl::DlCommand {
                 url,
                 download_args: DownloadArgs { output_dir: None },
+                cache_args: CacheArgs { cache_dir: None },
                 ..
             }) if url == "https://example.com/video" => {}
             _ => panic!("unexpected command: {:?}", cli.command),
@@ -237,6 +227,7 @@ mod tests {
                     DownloadArgs {
                         output_dir: Some(output_dir),
                     },
+                cache_args: CacheArgs { cache_dir: None },
                 ..
             }) if url == "https://example.com/video"
                 && output_dir.to_str() == Some("/tmp/output") => {}

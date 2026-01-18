@@ -1,14 +1,17 @@
 //! Web scraping and batch processing command
 
-use crate::cache::Cache;
 use crate::cap::{CapConfig, caption};
-use crate::cli::{CacheArgs, CacheConfig, CaptionArgs, DownloadArgs, ModelArgs};
+use crate::cli::{CacheArgs, CaptionArgs, DownloadArgs, IndexArgs, ModelArgs};
 use crate::config::ModelConfig;
 use crate::dl::{DownloadConfig, download};
+use crate::index::ArtifactCache;
 use clap::Args;
 use eyre::{Result, eyre};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use std::path::PathBuf;
+
+/// Maximum concurrent URL resolution requests
+const MAX_CONCURRENT_RESOLVES: usize = 64;
 
 #[derive(Args, Debug)]
 pub struct WebCommand {
@@ -24,16 +27,19 @@ pub struct WebCommand {
     pub limit: Option<usize>,
 
     #[command(flatten)]
-    pub download_args: DownloadArgs,
-
-    #[command(flatten)]
-    pub model_args: ModelArgs,
+    pub cache_args: CacheArgs,
 
     #[command(flatten)]
     pub caption_args: CaptionArgs,
 
     #[command(flatten)]
-    pub cache_args: CacheArgs,
+    pub download_args: DownloadArgs,
+
+    #[command(flatten)]
+    pub index_args: IndexArgs,
+
+    #[command(flatten)]
+    pub model_args: ModelArgs,
 }
 
 /// Validated configuration for web scraping operations
@@ -43,14 +49,8 @@ pub struct WebConfig {
     pub output_dir: Option<PathBuf>,
 }
 
-/// Fetch and extract YouTube URLs from page, update cache
-async fn fetch_page_urls(page_url: &str, cache: &mut Cache) -> Result<Vec<String>> {
-    // Check cache first
-    if let Some(urls) = cache.get_page_urls(page_url) {
-        tracing::info!(count = urls.len(), "using cached youtube urls");
-        return Ok(urls.to_vec());
-    }
-
+/// Fetch HTML and extract YouTube URLs from page
+async fn fetch_and_extract_urls(page_url: &str) -> Result<Vec<String>> {
     tracing::info!(url = %page_url, "fetching page");
     let html = melops_web::fetch_page(page_url)?;
 
@@ -68,14 +68,25 @@ async fn fetch_page_urls(page_url: &str, cache: &mut Cache) -> Result<Vec<String
             tracing::debug!(url = %url, "resolving url");
             melops_web::resolve_url(url).await
         })
-        .buffer_unordered(64)
+        .buffer_unordered(MAX_CONCURRENT_RESOLVES)
         .try_collect()
         .await?;
 
-    // Update cache
-    cache.set_page_urls(page_url.to_string(), resolved_urls.clone());
-
     Ok(resolved_urls)
+}
+
+/// Fetch and extract YouTube URLs from page, update index
+async fn fetch_page_urls(page_url: &str, index: &mut ArtifactCache) -> Result<Vec<String>> {
+    let page_url = page_url.to_string();
+
+    // Access URLs from cache or fetch new ones
+    let urls = index
+        .ensure_pages(page_url.clone(), || async move {
+            fetch_and_extract_urls(&page_url).await
+        })
+        .await?;
+
+    Ok(urls.clone())
 }
 
 /// Entry point for web command
@@ -87,13 +98,13 @@ pub async fn run(command: WebCommand) -> Result<()> {
     };
 
     let model_config = ModelConfig::try_from(command.model_args)?;
+    let cache_dir = command.cache_args.try_into()?;
 
-    // Load cache (application state)
-    let cache_config = CacheConfig::from(command.cache_args);
-    let mut cache = Cache::load(cache_config)?;
+    // Load index
+    let mut index = ArtifactCache::load(cache_dir, command.index_args)?;
 
     // Fetch YouTube URLs
-    let youtube_urls = fetch_page_urls(&web_config.page_url, &mut cache).await?;
+    let youtube_urls = fetch_page_urls(&web_config.page_url, &mut index).await?;
 
     // If dry run, output all URLs and exit
     if command.dry_run {
@@ -126,17 +137,17 @@ pub async fn run(command: WebCommand) -> Result<()> {
             output_dir: web_config.output_dir.clone(),
         };
 
-        let audio_path = download(&download_config, &mut cache)?;
+        let audio_path = download(&download_config, &mut index).await?;
 
         // Generate captions
         let cap_config = CapConfig {
-            path: audio_path.clone(),
-            output: audio_path.with_extension("srt"),
+            audio_path: audio_path.clone(),
+            output_path: audio_path.with_extension("srt"),
             preview: command.caption_args.preview,
             chunk_config: command.caption_args.chunk_args.try_into()?,
         };
 
-        caption(&cap_config, &model, &mut cache).await?;
+        caption(&cap_config, &model, &mut index).await?;
     }
 
     tracing::info!("completed processing all videos");
@@ -154,20 +165,16 @@ mod tests {
             url: "https://example.com/course".to_string(),
             dry_run: false,
             limit: None,
-            download_args: DownloadArgs { output_dir: None },
-            model_args: ModelArgs {
-                model_id: "test_model".to_string(),
-                model_source: ModelSource::Auto,
-            },
+            cache_args: CacheArgs { cache_dir: None },
             caption_args: CaptionArgs {
                 preview: false,
                 chunk_args: Default::default(),
             },
-            cache_args: CacheArgs {
-                cache_dir: None,
-                refresh_pages: false,
-                refresh_audio: false,
-                refresh_srt: false,
+            download_args: DownloadArgs { output_dir: None },
+            index_args: Default::default(),
+            model_args: ModelArgs {
+                model_id: "test_model".to_string(),
+                model_source: ModelSource::Auto,
             },
         };
 
