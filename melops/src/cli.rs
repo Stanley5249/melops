@@ -1,6 +1,7 @@
 //! CLI argument definitions using clap.
 //! CLI argument parsing and command execution.
 
+use crate::cache::CacheCommand;
 use crate::cap::CapCommand;
 use crate::dl::DlCommand;
 use crate::web::WebCommand;
@@ -28,6 +29,9 @@ pub enum Commands {
 
     /// Scrape web page for YouTube URLs and batch process
     Web(WebCommand),
+
+    /// Manage cache directory
+    Cache(CacheCommand),
 }
 
 /// Model source type selection.
@@ -152,6 +156,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         Commands::Cap(args) => crate::cap::run(args).await,
         Commands::Dl(args) => crate::dl::run(args).await,
         Commands::Web(args) => crate::web::run(args).await,
+        Commands::Cache(args) => crate::cache::run(args),
     }
 }
 

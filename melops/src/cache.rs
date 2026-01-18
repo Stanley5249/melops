@@ -3,19 +3,27 @@
 //! Cache directory structure:
 //! ```text
 //! <system_cache_dir>/melops/
-//! ├── cache.json          # Multi-level cache (pages → audio → SRT)
+//! ├── index.json          # Multi-level cache (pages → audio → SRT)
 //! ├── models/             # ONNX models from melops-export
 //! └── ort/                # OpenVINO execution provider cache
 //! ```
 
 use crate::cli::CacheConfig;
+use clap::{Args, Subcommand, ValueEnum};
 use eyre::{OptionExt, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-/// Cache filename
-pub const CACHE_FILENAME: &str = "cache.json";
+/// Index filename
+pub const INDEX_FILENAME: &str = "index.json";
+
+/// Models directory name
+pub const MODELS_DIR: &str = "models";
+
+/// ONNX Runtime cache directory name
+pub const ORT_DIR: &str = "ort";
 
 /// Get default cache directory
 ///
@@ -25,6 +33,43 @@ pub fn default_dir() -> Result<PathBuf> {
     dirs::cache_dir()
         .map(|d| d.join("melops"))
         .ok_or_eyre("failed to determine cache directory")
+}
+
+/// CLI arguments for cache management
+#[derive(Debug, Args)]
+pub struct CacheCommand {
+    /// Cache directory (default: system cache directory)
+    #[arg(long)]
+    pub cache_dir: Option<PathBuf>,
+
+    #[command(subcommand)]
+    pub command: CacheSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CacheSubcommand {
+    /// Show cache directory path
+    Dir,
+
+    /// Clean cache directory
+    Clean {
+        /// Cache type to clean
+        #[arg(value_enum, default_value_t = CacheType::default())]
+        cache_type: CacheType,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+pub enum CacheType {
+    /// All cache (entire melops directory)
+    All,
+    /// Index file (index.json) - tracks file mappings
+    #[default]
+    Index,
+    /// Exported models
+    Models,
+    /// ONNX Runtime cache
+    Ort,
 }
 
 /// Three-level cache structure
@@ -56,7 +101,7 @@ impl Cache {
             None => default_dir()?,
         };
 
-        let cache_path = dir.join(CACHE_FILENAME);
+        let cache_path = dir.join(INDEX_FILENAME);
         let data = if cache_path.exists() {
             let content = std::fs::read_to_string(&cache_path)?;
             serde_json::from_str(&content)?
@@ -142,5 +187,51 @@ impl Drop for Cache {
         if let Err(e) = self.save() {
             tracing::error!(error = %e, "failed to save cache");
         }
+    }
+}
+
+/// Run cache management command
+pub fn run(cmd: CacheCommand) -> Result<()> {
+    let dir = match cmd.cache_dir {
+        Some(dir) => dir,
+        None => default_dir()?,
+    };
+
+    match cmd.command {
+        CacheSubcommand::Dir => {
+            println!("{}", dir.display());
+            Ok(())
+        }
+        CacheSubcommand::Clean { cache_type } => clean(dir, cache_type),
+    }
+}
+
+fn clean(dir: PathBuf, cache_type: CacheType) -> Result<()> {
+    let (result, target) = match cache_type {
+        CacheType::All => (std::fs::remove_dir_all(&dir), dir),
+        CacheType::Index => {
+            let target = dir.join(INDEX_FILENAME);
+            (std::fs::remove_file(&target), target)
+        }
+        CacheType::Models => {
+            let target = dir.join(MODELS_DIR);
+            (std::fs::remove_dir_all(&target), target)
+        }
+        CacheType::Ort => {
+            let target = dir.join(ORT_DIR);
+            (std::fs::remove_dir_all(&target), target)
+        }
+    };
+
+    match result {
+        Ok(()) => {
+            println!("removed cache at {}", target.display());
+            Ok(())
+        }
+        Err(e) if e.kind() == ErrorKind::NotFound => {
+            println!("cache is already empty at {}", target.display());
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
     }
 }
