@@ -110,7 +110,7 @@ pub async fn run(command: CapCommand) -> Result<()> {
         path,
         output,
         preview: command.caption_args.preview,
-        chunk_config: command.caption_args.chunk_args.into(),
+        chunk_config: command.caption_args.chunk_args.try_into()?,
     };
 
     // Load cache (application state)

@@ -45,7 +45,7 @@ pub trait AsrModel {
     async fn forward(&self, audio: &[f32]) -> Result<Vec<TokenDuration>>;
 
     /// Run inference on a chunk of audio with offset, returning model outputs.
-    async fn forward_chunked(
+    async fn forward_chunk(
         &self,
         audio: &[f32],
         range: Range<usize>,
@@ -81,9 +81,16 @@ pub trait AsrModel {
     /// Transcribe audio with automatic chunking, returning merged segments.
     #[instrument(skip_all)]
     async fn transcribe_chunked(&self, audio: &[f32], config: ChunkConfig) -> Result<Vec<Segment>> {
-        let chunks = config
-            .chunk_audio(audio.len(), self.sample_rate())
-            .map(|range| self.forward_chunked(audio, range));
+        let chunk_iter = config.chunk_audio(audio.len(), self.sample_rate())?;
+        let total = chunk_iter.len();
+
+        let chunks = chunk_iter
+            .zip(1..)
+            .map(|(range, i)| {
+                tracing::info!(current = i, total);
+                range
+            })
+            .map(|range| self.forward_chunk(audio, range));
 
         let chunks: Vec<_> = stream::iter(chunks).buffered(2).try_collect().await?;
 

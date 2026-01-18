@@ -41,7 +41,7 @@ struct DecoderState {
 }
 
 impl TdtModel {
-    #[instrument(skip_all)]
+    #[instrument(level = "debug", skip_all)]
     pub(super) async fn encode(&self, audio_signal: Array2<f32>) -> Result<EncoderResponse> {
         let time_steps = audio_signal.dim().0;
         let audio_lengths = Tensor::from_array(([1_usize], vec![time_steps as i64]))?;
@@ -78,7 +78,7 @@ impl TdtModel {
         })
     }
 
-    #[instrument(skip_all)]
+    #[instrument(level = "debug", skip_all)]
     pub(super) async fn greedy_decode(
         &self,
         response: EncoderResponse,

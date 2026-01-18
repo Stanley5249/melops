@@ -114,7 +114,7 @@ pub async fn run(command: DlCommand) -> Result<()> {
         path: audio_path.clone(),
         output: audio_path.with_extension("srt"),
         preview: command.caption_args.preview,
-        chunk_config: command.caption_args.chunk_args.into(),
+        chunk_config: command.caption_args.chunk_args.try_into()?,
     };
 
     // Load model and caption

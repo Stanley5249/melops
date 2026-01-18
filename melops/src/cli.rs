@@ -68,8 +68,10 @@ pub struct ChunkArgs {
     pub overlap: f32,
 }
 
-impl From<ChunkArgs> for ChunkConfig {
-    fn from(args: ChunkArgs) -> Self {
+impl TryFrom<ChunkArgs> for ChunkConfig {
+    type Error = melops_asr::error::Error;
+
+    fn try_from(args: ChunkArgs) -> Result<Self, Self::Error> {
         ChunkConfig::new(args.duration, args.overlap)
     }
 }
@@ -77,8 +79,8 @@ impl From<ChunkArgs> for ChunkConfig {
 impl From<ChunkConfig> for ChunkArgs {
     fn from(config: ChunkConfig) -> Self {
         ChunkArgs {
-            duration: config.duration,
-            overlap: config.overlap,
+            duration: config.duration(),
+            overlap: config.overlap(),
         }
     }
 }
