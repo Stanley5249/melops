@@ -29,7 +29,7 @@ impl AsrModel for TdtModel {
     }
 
     /// Run TDT inference on audio, returning token-duration sequence.
-    #[instrument(skip_all)]
+    #[instrument(level = "debug", skip_all)]
     async fn forward(&self, audio: &[f32]) -> Result<Vec<TokenDuration>> {
         let features = Self::MEL_SPECTOGRAM.apply(audio);
         let encoder_output = self.encode(features).await?;

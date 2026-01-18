@@ -50,10 +50,6 @@ pub trait AsrModel {
         audio: &[f32],
         range: Range<usize>,
     ) -> Result<Vec<TokenDuration>> {
-        let start = format!("{:.2}s", self.samples_to_secs(range.start));
-        let end = format!("{:.2}s", self.samples_to_secs(range.end));
-        tracing::info!(%start, %end);
-
         let frames = self.samples_to_frames(range.start);
 
         let chunk = &audio[range];
@@ -87,7 +83,14 @@ pub trait AsrModel {
         let chunks = chunk_iter
             .zip(1..)
             .map(|(range, i)| {
-                tracing::info!(current = i, total);
+                tracing::info!(
+                    progress=%format!("{}/{}", i, total),
+                    range = %format!(
+                        "{:.1}-{:.1}s",
+                        self.samples_to_secs(range.start),
+                        self.samples_to_secs(range.end)
+                    )
+                );
                 range
             })
             .map(|range| self.forward_chunk(audio, range));

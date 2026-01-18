@@ -7,7 +7,7 @@ version = "0.1.0"
 preview = ["pixi-build"]
 
 [activation.env]
-RUST_LOG = "info,melops=debug,ort=warn"
+RUST_LOG = "info,melops_asr=info,melops=debug,ort=warn"
 
 [tasks]
 mel = "cargo run -p melops"

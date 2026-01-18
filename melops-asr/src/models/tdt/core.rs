@@ -88,7 +88,7 @@ impl TdtModel {
     }
 
     /// Load encoder ONNX session.
-    #[instrument(skip_all, fields(file=?file.display()))]
+    #[instrument(level = "debug", skip_all, fields(file=?file.display()))]
     fn load_encoder(file: &Path, session_builder: &SessionBuilder) -> Result<Session> {
         session_builder
             .clone()
@@ -97,7 +97,7 @@ impl TdtModel {
     }
 
     /// Load decoder ONNX session.
-    #[instrument(skip_all, fields(file=?file.display()))]
+    #[instrument(level = "debug", skip_all, fields(file=?file.display()))]
     fn load_decoder_joint(file: &Path, session_builder: &SessionBuilder) -> Result<Session> {
         session_builder
             .clone()
@@ -106,7 +106,7 @@ impl TdtModel {
     }
 
     /// Load and create detokenizer.
-    #[instrument(skip_all, fields(file=?file.display()))]
+    #[instrument(level = "debug", skip_all, fields(file=?file.display()))]
     fn load_detokenizer(file: &Path) -> Result<TdtTokenizer> {
         let tokenizer = Tokenizer::from_file(file)
             .map_err(|e| eyre!(e))
