@@ -3,8 +3,8 @@
 use crate::error::{ConfigError, Result};
 use std::ops::Range;
 
-/// Default chunk duration in seconds (1 minute)
-pub const DEFAULT_CHUNK_DURATION: f32 = 60.0;
+/// Default chunk duration in seconds (30 seconds)
+pub const DEFAULT_CHUNK_DURATION: f32 = 30.0;
 
 /// Default chunk overlap in seconds
 pub const DEFAULT_CHUNK_OVERLAP: f32 = 1.0;
