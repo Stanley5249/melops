@@ -9,7 +9,6 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 
-#[must_use]
 fn init_tracing() -> Result<WorkerGuard> {
     let subscriber = tracing_subscriber::registry();
 

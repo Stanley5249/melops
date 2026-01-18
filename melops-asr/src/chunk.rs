@@ -88,7 +88,7 @@ impl ChunkRangeIter {
         }
 
         // Calculate total chunks: ceil(len / step_size)
-        (self.len + self.step_size - 1) / self.step_size
+        self.len.div_ceil(self.step_size)
     }
 
     /// Check if the iterator is empty.
@@ -124,7 +124,7 @@ impl Iterator for ChunkRangeIter {
         }
 
         // Calculate chunks remaining: ceil(remaining / step_size)
-        let count = (remaining + self.step_size - 1) / self.step_size;
+        let count = remaining.div_ceil(self.step_size);
         (count, Some(count))
     }
 }
