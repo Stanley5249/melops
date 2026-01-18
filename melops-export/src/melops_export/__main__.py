@@ -23,7 +23,7 @@ def main():
         type=str,
         default=None,
         help="output directory for onnx model and tokenizer "
-        "(default: .cache/melops/models/<REPO_ID>)",
+        "(default: <system_cache>/melops/models/<REPO_ID>)",
     )
     args = parser.parse_args()
 

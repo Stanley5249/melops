@@ -1,5 +1,6 @@
 //! ONNX Runtime initialization and session configuration
 
+use crate::cache;
 use eyre::Result;
 use ort::environment::GlobalThreadPoolOptions;
 use ort::session::Session;
@@ -10,6 +11,9 @@ use ort::ep::*;
 
 /// Initialize ONNX Runtime with execution providers and global configuration
 pub fn init() -> Result<bool> {
+    let mut cache_dir = cache::default_dir()?;
+    cache_dir.push("ort");
+
     let eps = [
         #[cfg(feature = "cuda")]
         CUDA::default().build(),
@@ -18,7 +22,7 @@ pub fn init() -> Result<bool> {
         #[cfg(feature = "openvino")]
         OpenVINO::default()
             .with_device_type("HETERO:GPU,CPU")
-            .with_cache_dir(".cache/ort")
+            .with_cache_dir(cache_dir.to_string_lossy())
             .with_precision("FP16")
             .build(),
         #[cfg(feature = "directml")]

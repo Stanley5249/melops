@@ -1,4 +1,12 @@
-//! Cache management for web scraping operations
+//! Unified cache management for melops
+//!
+//! Cache directory structure:
+//! ```text
+//! <system_cache_dir>/melops/
+//! ├── cache.json          # Multi-level cache (pages → audio → SRT)
+//! ├── models/             # ONNX models from melops-export
+//! └── ort/                # OpenVINO execution provider cache
+//! ```
 
 use crate::cli::CacheConfig;
 use eyre::{OptionExt, Result};
@@ -11,14 +19,15 @@ pub const CACHE_FILENAME: &str = "cache.json";
 
 /// Get default cache directory
 ///
-/// Returns system cache directory with "melops" subdirectory
+/// Returns system cache directory with "melops" subdirectory.
+/// This is the unified cache root for all melops components.
 pub fn default_dir() -> Result<PathBuf> {
     dirs::cache_dir()
         .map(|d| d.join("melops"))
         .ok_or_eyre("failed to determine cache directory")
 }
 
-/// Three-level cache structure for web scraping
+/// Three-level cache structure
 ///
 /// Level 1: page_url → Vec<resolved_youtube_url>
 /// Level 2: resolved_youtube_url → audio_path

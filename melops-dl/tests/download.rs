@@ -48,7 +48,8 @@ static TEST_CONTEXT: LazyLock<Result<TestContext>> = LazyLock::new(|| {
 
 fn create_temp_dir() -> PathBuf {
     let mut temp_dir = std::env::temp_dir();
-    temp_dir.push("melops-dl-test");
+    temp_dir.push("melops");
+    temp_dir.push("test");
 
     // Clean up previous test run
     if temp_dir.exists() {

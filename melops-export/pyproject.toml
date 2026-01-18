@@ -22,6 +22,7 @@ dependencies = [
   "torch>=2.8.0,<2.9",
   "onnxscript>=0.5.0,<0.6",
   "tokenizers>=0.21.4,<0.22",
+  "platformdirs>=4.5.1,<5",
 ]
 
 [project.urls]

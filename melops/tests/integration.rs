@@ -8,7 +8,7 @@ const URL: &str = "https://youtu.be/jNQXAC9IVRw";
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "network I/O and model download required"]
 async fn dl_downloads_and_transcribes() {
-    let temp_dir = std::env::temp_dir().join("melops-test");
+    let temp_dir = std::env::temp_dir().join("melops").join("test");
 
     // Clean up previous test run
     if temp_dir.exists() {

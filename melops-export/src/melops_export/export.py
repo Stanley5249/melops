@@ -13,16 +13,26 @@ from nemo.collections.asr.models import ASRModel, EncDecRNNTBPEModel
 from nemo.collections.common.tokenizers import (
     SentencePieceTokenizer as NemoSentencePieceTokenizer,
 )
+from onnx.external_data_helper import (
+    convert_model_to_external_data,
+    write_external_data_tensors,
+)
+from platformdirs import user_cache_dir
 from tokenizers.implementations import (
     SentencePieceBPETokenizer as HFSentencePieceBPETokenizer,
 )
 
 
+def get_cache_dir() -> Path:
+    """Get system cache directory with melops subdirectory."""
+    return Path(user_cache_dir()) / "melops"
+
+
 def resolve_output_dir(repo_id: str, out_dir: str | None) -> Path:
-    """Resolve output directory, defaulting to .cache/melops/models/<repo_id>."""
+    """Resolve output directory, defaulting to <system_cache>/melops/models/<repo_id>."""
     if out_dir is not None:
         return Path(out_dir)
-    return Path(".cache/melops/models") / repo_id.replace("/", "--")
+    return get_cache_dir() / "models" / repo_id.replace("/", "--")
 
 
 def load_model(repo_id: str) -> ASRModel:
@@ -37,22 +47,29 @@ def consolidate_external_data(onnx_path: Path, output_dir: Path) -> Path:
     """Consolidate NeMo's 295+ weight files into single .data file.
 
     NeMo exports create many separate weight files (external data format).
-    This loads the model and saves with all weights in one .data file.
+    This loads the model and repacks all weights contiguously into one .data file.
     Required for models >2GB due to protobuf limits.
     """
     model = onnx.load(str(onnx_path))
     output_dir.mkdir(parents=True, exist_ok=True)
     output_onnx = output_dir / onnx_path.name
     data_file = output_onnx.stem + ".data"
+    data_path = output_dir / data_file
 
-    onnx.save(
+    # Remove existing data file to prevent appending
+    if data_path.exists():
+        data_path.unlink()
+
+    convert_model_to_external_data(
         model,
-        str(output_onnx),
-        save_as_external_data=True,
         all_tensors_to_one_file=True,
         location=data_file,
+        size_threshold=0,
     )
-    print(f"Save model to {output_onnx} and {data_file}")
+
+    write_external_data_tensors(model, str(output_dir))
+    onnx.save(model, str(output_onnx))
+    print(f"Saved model to {output_onnx} ({data_file})")
     return output_onnx
 
 
@@ -111,7 +128,7 @@ def export_model(
 
     Args:
         repo_id: HuggingFace repo ID or .nemo path (default: nvidia/parakeet-tdt-0.6b-v3)
-        out_dir: Output directory (default: .cache/melops/models/<repo_id>)
+        out_dir: Output directory (default: <system_cache>/melops/models/<repo_id>)
     """
     if repo_id is None:
         repo_id = "nvidia/parakeet-tdt-0.6b-v3"
@@ -122,7 +139,10 @@ def export_model(
     if not isinstance(model, EncDecRNNTBPEModel):
         raise TypeError(f"unsupported model type: {type(model).__name__}")
 
-    with tempfile.TemporaryDirectory(prefix="melops_export_") as temp_dir:
+    temp_base = Path(tempfile.gettempdir()) / "melops" / "export"
+    temp_base.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(dir=temp_base) as temp_dir:
         temp_path = Path(temp_dir)
         export_onnx_rnnt(model, temp_path, output_path)
         export_tokenizer(model, output_path)
