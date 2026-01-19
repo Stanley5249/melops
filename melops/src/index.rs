@@ -233,7 +233,7 @@ mod tests {
         let mut cache = ResourceCache::<&str, i32>::new();
 
         let result = cache
-            .access("key", CacheStrategy::Get, || async {
+            .access("key", CacheStrategy::Get, async || {
                 panic!("factory should not be called for Get")
             })
             .await;
@@ -246,7 +246,7 @@ mod tests {
         cache.insert("key", 42);
 
         let result = cache
-            .access("key", CacheStrategy::Get, || async {
+            .access("key", CacheStrategy::Get, async || {
                 panic!("factory should not be called for cached Get")
             })
             .await
@@ -259,7 +259,7 @@ mod tests {
         let mut cache = ResourceCache::new();
 
         let result1 = cache
-            .access("key", CacheStrategy::GetOrInsert, || async {
+            .access("key", CacheStrategy::GetOrInsert, async || {
                 Ok::<_, eyre::Report>(42)
             })
             .await
@@ -268,7 +268,7 @@ mod tests {
 
         // Second access should return cached value
         let result2 = cache
-            .access("key", CacheStrategy::GetOrInsert, || async {
+            .access("key", CacheStrategy::GetOrInsert, async || {
                 panic!("factory should not be called for cached value")
             })
             .await
@@ -282,7 +282,7 @@ mod tests {
         cache.insert("key", 42);
 
         let result = cache
-            .access("key", CacheStrategy::Replace, || async {
+            .access("key", CacheStrategy::Replace, async || {
                 Ok::<_, eyre::Report>(99)
             })
             .await

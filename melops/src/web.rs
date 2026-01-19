@@ -64,7 +64,7 @@ async fn fetch_and_extract_urls(page_url: &str) -> Result<Vec<String>> {
     tracing::info!(count = urls.len(), "resolving youtube urls");
 
     let resolved_urls: Vec<String> = stream::iter(&urls)
-        .map(|url| async move {
+        .map(async |url| {
             tracing::debug!(url = %url, "resolving url");
             melops_web::resolve_url(url).await
         })
@@ -81,7 +81,7 @@ async fn fetch_page_urls(page_url: &str, index: &mut ArtifactCache) -> Result<Ve
 
     // Access URLs from cache or fetch new ones
     let urls = index
-        .ensure_pages(page_url.clone(), || async move {
+        .ensure_pages(page_url.clone(), async || {
             fetch_and_extract_urls(&page_url).await
         })
         .await?;

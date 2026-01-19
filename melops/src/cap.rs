@@ -60,7 +60,7 @@ pub async fn caption(
 
     // Access SRT path from cache or generate new one
     let srt_path = index
-        .ensure_srt(cache_key, || async {
+        .ensure_srt(cache_key, async || {
             // Load audio
             let audio = read_audio_mono(&config.audio_path).wrap_err_with(|| {
                 format!("failed to load audio: {:?}", config.audio_path.display())

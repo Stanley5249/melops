@@ -57,7 +57,7 @@ pub async fn download(config: &DownloadConfig, index: &mut ArtifactCache) -> Res
     let url = config.url.clone();
 
     let path = index
-        .ensure_audio(url.clone(), || async move {
+        .ensure_audio(url.clone(), async || {
             tracing::info!(url = %url, "downloading audio");
 
             let params = config.to_params();

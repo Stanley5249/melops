@@ -13,6 +13,8 @@ use eyre::{OptionExt, Result};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
+use crate::cli::CacheArgs;
+
 /// Index filename
 pub const INDEX_FILENAME: &str = "index.json";
 
@@ -22,21 +24,24 @@ pub const MODELS_DIR: &str = "models";
 /// ONNX Runtime cache directory name
 pub const ORT_DIR: &str = "ort";
 
-/// Get default cache directory
-///
-/// Returns system cache directory with "melops" subdirectory.
-/// This is the unified cache root for all melops components.
-pub fn default_dir() -> Result<PathBuf> {
-    dirs::cache_dir()
-        .map(|d| d.join("melops"))
-        .ok_or_eyre("failed to determine cache directory")
-}
-
 /// Validated cache directory wrapper.
 #[derive(Clone, Debug)]
 pub struct CacheDir(PathBuf);
 
 impl CacheDir {
+    /// Create cache directory from optional path
+    ///
+    /// When None, uses system cache directory.
+    pub fn new(cache_dir: Option<PathBuf>) -> Result<Self> {
+        let path = match cache_dir {
+            Some(dir) => dir,
+            None => dirs::cache_dir()
+                .map(|d| d.join("melops"))
+                .ok_or_eyre("failed to determine cache directory")?,
+        };
+        Ok(CacheDir(path))
+    }
+
     /// Get the cache directory path
     #[must_use]
     pub fn path(&self) -> &Path {
@@ -48,26 +53,27 @@ impl CacheDir {
     pub fn join(&self, path: impl AsRef<Path>) -> PathBuf {
         self.0.join(path)
     }
+
+    /// Get path to a model in the cache
+    #[must_use]
+    pub fn model(&self, model_id: &str) -> PathBuf {
+        self.0.join(MODELS_DIR).join(model_id)
+    }
 }
 
 impl TryFrom<crate::cli::CacheArgs> for CacheDir {
     type Error = eyre::Report;
 
     fn try_from(args: crate::cli::CacheArgs) -> Result<Self> {
-        let path = match args.cache_dir {
-            Some(dir) => dir,
-            None => default_dir()?,
-        };
-        Ok(CacheDir(path))
+        Self::new(args.cache_dir)
     }
 }
 
 /// CLI arguments for cache management
 #[derive(Args, Debug)]
 pub struct CacheCommand {
-    /// Cache directory (default: system cache directory)
-    #[arg(long)]
-    pub cache_dir: Option<PathBuf>,
+    #[command(flatten)]
+    pub cache_args: CacheArgs,
 
     #[command(subcommand)]
     pub command: CacheSubcommand,
@@ -101,17 +107,14 @@ pub enum CacheType {
 
 /// Run cache management command
 pub fn run(cmd: CacheCommand) -> Result<()> {
-    let dir = match cmd.cache_dir {
-        Some(dir) => dir,
-        None => default_dir()?,
-    };
+    let cache_dir = CacheDir::try_from(cmd.cache_args)?;
 
     match cmd.command {
         CacheSubcommand::Dir => {
-            println!("{}", dir.display());
+            println!("{}", cache_dir.path().display());
             Ok(())
         }
-        CacheSubcommand::Clean { cache_type } => clean(&dir, cache_type),
+        CacheSubcommand::Clean { cache_type } => clean(cache_dir.path(), cache_type),
     }
 }
 

@@ -7,4 +7,5 @@ pub mod index;
 pub mod ort;
 pub mod segment;
 pub mod srt;
+pub mod tracing;
 pub mod web;
