@@ -33,11 +33,14 @@ static TEST_CONTEXT: LazyLock<Result<TestContext>> = LazyLock::new(|| {
     preset.paths = Some(OutputPaths::simple(&temp_dir, &temp_dir));
     preset.outtmpl = Some(OutputTemplates::simple(ASR_OUTPUT_TEMPLATE.to_string()));
 
-    let (audio_path, info) =
+    let (audio_paths, info) =
         download(TEST_URL, preset).context("yt-dlp download failed for ASR Pcm16 preset")?;
 
     // Validate file_path was returned and exists
-    let file_path = audio_path.ok_or_eyre("download did not return file_path")?;
+    let file_path = audio_paths
+        .first()
+        .ok_or_eyre("download did not return any file paths")?
+        .clone();
 
     ensure!(
         file_path.exists(),

@@ -6,7 +6,7 @@ use crate::cli::{CacheArgs, CaptionArgs, DownloadArgs, ModelArgs};
 use crate::config::ModelConfig;
 use clap::Args;
 use color_eyre::Section;
-use eyre::{OptionExt, Result, WrapErr, ensure};
+use eyre::{Result, WrapErr, ensure};
 use melops_dl::asr::AudioFormat;
 use melops_dl::params::DownloadParams;
 use std::path::{Path, PathBuf};
@@ -51,20 +51,14 @@ impl DownloadConfig {
 
 /// Download audio from URL
 async fn download_audio(config: &DownloadConfig) -> Result<Vec<PathBuf>> {
-    let (file_path, _info) = melops_dl::dl::download(&config.url, config.to_params())
+    let (audio_path, _info) = melops_dl::dl::download(&config.url, config.to_params())
         .wrap_err("failed to download audio")?;
 
-    let audio_path = file_path.ok_or_eyre("yt-dlp did not return downloaded file path")?;
+    ensure!(!audio_path.is_empty(), "no audio files were downloaded",);
 
-    ensure!(
-        audio_path.exists(),
-        "audio file does not exist after download: {}",
-        audio_path.display()
-    );
+    tracing::info!(count = audio_path.len(), "save audio");
 
-    tracing::info!(file = ?audio_path.display(), "save audio");
-
-    Ok(vec![audio_path])
+    Ok(audio_path)
 }
 
 fn validate_cache(paths: &[PathBuf]) -> bool {
