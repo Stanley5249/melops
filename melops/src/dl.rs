@@ -9,7 +9,7 @@ use color_eyre::Section;
 use eyre::{OptionExt, Result, WrapErr, ensure};
 use melops_dl::asr::AudioFormat;
 use melops_dl::params::DownloadParams;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// CLI arguments for download and caption generation.
 #[derive(Args, Debug)]
@@ -50,9 +50,9 @@ impl DownloadConfig {
 }
 
 /// Download audio from URL
-async fn download_audio(url: &str, params: DownloadParams) -> Result<PathBuf> {
-    let (file_path, _info) =
-        melops_dl::dl::download(url, params).wrap_err("failed to download audio")?;
+async fn download_audio(config: &DownloadConfig) -> Result<Vec<PathBuf>> {
+    let (file_path, _info) = melops_dl::dl::download(&config.url, config.to_params())
+        .wrap_err("failed to download audio")?;
 
     let audio_path = file_path.ok_or_eyre("yt-dlp did not return downloaded file path")?;
 
@@ -64,7 +64,45 @@ async fn download_audio(url: &str, params: DownloadParams) -> Result<PathBuf> {
 
     tracing::info!(file = ?audio_path.display(), "save audio");
 
-    Ok(audio_path)
+    Ok(vec![audio_path])
+}
+
+fn validate_cache(paths: &[PathBuf]) -> bool {
+    if paths.is_empty() {
+        tracing::debug!("cache contains no paths");
+        return false;
+    }
+
+    let mut is_valid = true;
+
+    for path in paths {
+        if !path.exists() {
+            tracing::debug!(path = ?path.display(), "cached file does not exist");
+            is_valid = false;
+        }
+    }
+
+    if is_valid {
+        tracing::debug!(count = paths.len(), "all cached files exist");
+    }
+
+    is_valid
+}
+
+async fn write_cache(dir: &Path, key: &str, paths: &[PathBuf]) {
+    tracing::debug!(count = paths.len(), "writing audio paths to cache");
+
+    let data = match serde_json::to_string(paths) {
+        Ok(data) => data,
+        Err(err) => {
+            tracing::warn!(%err, "failed to serialize paths for cache");
+            return;
+        }
+    };
+
+    if let Err(err) = cacache::write(dir, key, &data).await {
+        tracing::warn!(%err, "failed to write cache");
+    }
 }
 
 /// Download audio from URL using cache
@@ -78,29 +116,36 @@ pub async fn download(
 
     let result: Result<Vec<PathBuf>> = match strategy {
         CacheStrategy::Use => {
-            let bytes = cacache::read(&dir, &key).await?;
-            Ok(serde_json::from_slice(&bytes)?)
+            tracing::debug!("reading audio paths from cache");
+            Ok(serde_json::from_slice(&cacache::read(&dir, &key).await?)?)
         }
         CacheStrategy::Auto => match cacache::read(&dir, &key).await {
-            Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+            Ok(bytes) => {
+                let paths: Vec<PathBuf> = serde_json::from_slice(&bytes)?;
+
+                if validate_cache(&paths) {
+                    tracing::info!("using cached audio files");
+                    Ok(paths)
+                } else {
+                    tracing::info!("cached files invalidated, downloading again");
+                    Ok(download_audio(&config).await?)
+                }
+            }
             Err(err) => {
-                let params = config.to_params();
-                let path = download_audio(&config.url, params).await.wrap_err(err)?;
-                Ok(vec![path])
+                tracing::info!("no cached audio found, downloading");
+                Ok(download_audio(&config).await.wrap_err(err)?)
             }
         },
         CacheStrategy::Force => {
-            let params = config.to_params();
-            let path = download_audio(&config.url, params).await?;
-            Ok(vec![path])
+            tracing::info!("forcing download, ignoring cache");
+            Ok(download_audio(&config).await?)
         }
     };
 
     let paths = result?;
 
     if strategy != CacheStrategy::Use {
-        let data = serde_json::to_string(&paths)?;
-        cacache::write(&dir, &key, &data).await?;
+        write_cache(&dir, key, &paths).await;
     }
 
     Ok(paths)
@@ -123,22 +168,20 @@ pub async fn run(command: DlCommand) -> Result<()> {
 
     let cache_srt = command.caption_args.cache_cap;
 
+    // Fast failing: validate chunk config before expensive operations
+    let chunk_config = command.caption_args.chunk_args.try_into()?;
+
     // Load model once for all files
     let model = model_config.load()?;
 
     // Process each audio file
     for audio_path in &audio_paths {
-        tracing::info!(
-            downloaded = ?audio_path.display(),
-            "audio downloaded, starting captioning"
-        );
-
         // Create caption config
         let cap_config = CapConfig {
             audio_path: audio_path.clone(),
             output_path: audio_path.with_extension("srt"),
             preview: command.caption_args.preview,
-            chunk_config: command.caption_args.chunk_args.try_into()?,
+            chunk_config,
         };
 
         // Generate captions
