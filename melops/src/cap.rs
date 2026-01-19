@@ -14,6 +14,7 @@ use melops_asr::chunk::ChunkConfig;
 use melops_asr::models::tdt::core::TdtModel;
 use melops_asr::traits::AsrModel;
 use melops_asr::types::Segment;
+use std::path::Path;
 use std::path::PathBuf;
 
 /// CLI arguments for caption generation.
@@ -45,6 +46,22 @@ pub struct CapConfig {
     pub chunk_config: ChunkConfig,
 }
 
+async fn write_cache(dir: &Path, key: &str, segments: &[Segment]) {
+    tracing::debug!("writing segments to cache");
+
+    let data = match serde_json::to_string(segments) {
+        Ok(data) => data,
+        Err(err) => {
+            tracing::warn!(%err, "failed to serialize segments for cache");
+            return;
+        }
+    };
+
+    if let Err(err) = cacache::write(dir, key, &data).await {
+        tracing::warn!(%err, "failed to write cache");
+    }
+}
+
 /// Generate captions with pre-loaded model and cache index
 pub async fn caption(
     config: &CapConfig,
@@ -61,23 +78,32 @@ pub async fn caption(
 
     let result: Result<Vec<Segment>> = match strategy {
         CacheStrategy::Use => {
+            tracing::debug!("reading segments from cache");
             let bytes = cacache::read(&dir, &key).await?;
             Ok(serde_json::from_slice(&bytes)?)
         }
         CacheStrategy::Auto => match cacache::read(&dir, &key).await {
-            Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
-            Err(err) => Ok(transcribe(&audio, &config.chunk_config, model)
-                .await
-                .wrap_err(err)?),
+            Ok(bytes) => {
+                tracing::info!("using cached transcription");
+                Ok(serde_json::from_slice(&bytes)?)
+            }
+            Err(err) => {
+                tracing::info!("no cached transcription found, transcribing");
+                Ok(transcribe(&audio, &config.chunk_config, model)
+                    .await
+                    .wrap_err(err)?)
+            }
         },
-        CacheStrategy::Force => Ok(transcribe(&audio, &config.chunk_config, model).await?),
+        CacheStrategy::Force => {
+            tracing::info!("forcing transcription, ignoring cache");
+            Ok(transcribe(&audio, &config.chunk_config, model).await?)
+        }
     };
 
     let segments = result?;
 
     if strategy != CacheStrategy::Use {
-        let data = serde_json::to_string(&segments)?;
-        cacache::write(&dir, &key, &data).await?;
+        write_cache(&dir, &key, &segments).await;
     }
 
     // Regroup segments for comfortable speed

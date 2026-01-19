@@ -8,7 +8,7 @@ use crate::dl::{DownloadConfig, download};
 use clap::Args;
 use eyre::{Result, WrapErr, eyre};
 use futures::stream::{self, StreamExt, TryStreamExt};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Maximum concurrent URL resolution requests
 const MAX_CONCURRENT_RESOLVES: usize = 64;
@@ -75,6 +75,22 @@ async fn fetch_and_extract_urls(page_url: &str) -> Result<Vec<String>> {
     Ok(resolved_urls)
 }
 
+async fn write_cache(dir: &Path, key: &str, urls: &[String]) {
+    tracing::debug!("writing page urls to cache");
+
+    let data = match serde_json::to_string(urls) {
+        Ok(data) => data,
+        Err(err) => {
+            tracing::warn!(%err, "failed to serialize urls for cache");
+            return;
+        }
+    };
+
+    if let Err(err) = cacache::write(dir, key, &data).await {
+        tracing::warn!(%err, "failed to write cache");
+    }
+}
+
 /// Fetch and extract YouTube URLs from page using cache
 async fn fetch_page_urls(
     page_url: &str,
@@ -86,21 +102,30 @@ async fn fetch_page_urls(
 
     let result: Result<Vec<String>> = match strategy {
         CacheStrategy::Use => {
+            tracing::debug!("reading page urls from cache");
             let bytes = cacache::read(&dir, &key).await?;
             Ok(serde_json::from_slice(&bytes)?)
         }
         CacheStrategy::Auto => match cacache::read(&dir, &key).await {
-            Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
-            Err(err) => Ok(fetch_and_extract_urls(page_url).await.wrap_err(err)?),
+            Ok(bytes) => {
+                tracing::info!("using cached page urls");
+                Ok(serde_json::from_slice(&bytes)?)
+            }
+            Err(err) => {
+                tracing::info!("no cached page found, fetching");
+                Ok(fetch_and_extract_urls(page_url).await.wrap_err(err)?)
+            }
         },
-        CacheStrategy::Force => Ok(fetch_and_extract_urls(page_url).await?),
+        CacheStrategy::Force => {
+            tracing::info!("forcing page fetch, ignoring cache");
+            Ok(fetch_and_extract_urls(page_url).await?)
+        }
     };
 
     let urls = result?;
 
     if strategy != CacheStrategy::Use {
-        let data = serde_json::to_string(&urls)?;
-        cacache::write(&dir, &key, &data).await?;
+        write_cache(&dir, key, &urls).await;
     }
 
     Ok(urls)
