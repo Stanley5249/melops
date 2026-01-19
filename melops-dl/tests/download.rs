@@ -7,7 +7,9 @@
 
 use eyre::{Context, OptionExt, Result, ensure};
 use melops_dl::asr::{ASR_OUTPUT_TEMPLATE, AudioFormat};
-use melops_dl::dl::{DownloadInfo, DownloadOptions, OutputPaths, OutputTemplates, download};
+use melops_dl::dl::download;
+use melops_dl::info::DownloadInfo;
+use melops_dl::params::{DownloadParams, OutputPaths, OutputTemplates};
 use std::fs::{create_dir_all, remove_dir_all};
 use std::path::PathBuf;
 use std::sync::LazyLock;
@@ -27,7 +29,7 @@ struct TestContext {
 static TEST_CONTEXT: LazyLock<Result<TestContext>> = LazyLock::new(|| {
     let temp_dir = create_temp_dir();
 
-    let mut preset: DownloadOptions = AudioFormat::Pcm16.into();
+    let mut preset: DownloadParams = AudioFormat::Pcm16.into();
     preset.paths = Some(OutputPaths::simple(&temp_dir, &temp_dir));
     preset.outtmpl = Some(OutputTemplates::simple(ASR_OUTPUT_TEMPLATE.to_string()));
 

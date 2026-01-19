@@ -2,7 +2,9 @@
 //!
 //! ## Modules
 //!
-//! - [`dl`] - Core yt-dlp API wrappers
+//! - [`dl`] - Download function (main entry point)
+//! - [`params`] - yt-dlp download parameters and configuration
+//! - [`info`] - Metadata output types from yt-dlp
 //! - [`asr`] - ASR presets for 16kHz mono audio extraction
 //!
 //! ## Quick Start
@@ -20,14 +22,15 @@
 //!
 //! **Custom configuration**:
 //! ```no_run
-//! use melops_dl::dl::{download, DownloadOptions, OutputPaths, OutputTemplates, PostProcessor};
+//! use melops_dl::dl::download;
+//! use melops_dl::params::{DownloadParams, OutputPaths, OutputTemplates, PostProcessor};
 //! use std::collections::HashMap;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let mut templates = HashMap::new();
 //! templates.insert("default".to_string(), "%(uploader)s/%(title)s.%(ext)s".to_string());
 //!
-//! let opts = DownloadOptions {
+//! let params = DownloadParams {
 //!     format: Some("bestaudio".to_string()),
 //!     paths: Some(OutputPaths::system_default()),
 //!     outtmpl: Some(OutputTemplates(Some(templates))),
@@ -40,7 +43,7 @@
 //!     ..Default::default()
 //! };
 //!
-//! let (file_path, info) = download("https://youtube.com/watch?v=example", opts)?;
+//! let (file_path, info) = download("https://youtube.com/watch?v=example", params)?;
 //! println!("Downloaded '{}' to {:?}", info.title, file_path);
 //! # Ok(())
 //! # }
@@ -48,3 +51,5 @@
 
 pub mod asr;
 pub mod dl;
+pub mod info;
+pub mod params;

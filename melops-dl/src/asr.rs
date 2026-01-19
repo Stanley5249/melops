@@ -13,7 +13,9 @@
 //!
 //! **Output:** `downloads/Extractor/uploader/id/title.wav` + `title.info.json`
 
-use crate::dl::{DownloadOptions, OutputPaths, OutputTemplates, PostProcessor, PostProcessorArgs};
+use crate::params::{
+    DownloadParams, OutputPaths, OutputTemplates, PostProcessor, PostProcessorArgs,
+};
 
 /// Output template for ASR: "<Extractor>/<uploader>/<id>/<title>.<ext>"
 pub const ASR_OUTPUT_TEMPLATE: &str = "%(extractor_key)s/%(uploader)s/%(id)s/%(title)s.%(ext)s";
@@ -53,7 +55,7 @@ impl From<AudioFormat> for PostProcessorArgs {
     }
 }
 
-impl From<AudioFormat> for DownloadOptions {
+impl From<AudioFormat> for DownloadParams {
     /// ASR preset: best audio → 16kHz mono WAV, organized by `Extractor/uploader/id`, saves `.info.json`
     fn from(format: AudioFormat) -> Self {
         Self {
@@ -99,10 +101,10 @@ mod tests {
 
     #[test]
     fn dl_options_from_audio_format() {
-        let opts: DownloadOptions = AudioFormat::Pcm16.into();
+        let opts: DownloadParams = AudioFormat::Pcm16.into();
 
         match opts {
-            DownloadOptions {
+            DownloadParams {
                 format: Some(format),
                 paths: Some(_),
                 outtmpl: Some(_),

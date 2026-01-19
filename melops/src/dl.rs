@@ -8,7 +8,7 @@ use clap::Args;
 use color_eyre::Section;
 use eyre::{OptionExt, Result, WrapErr, eyre};
 use melops_dl::asr::AudioFormat;
-use melops_dl::dl::DownloadOptions;
+use melops_dl::params::DownloadParams;
 use std::path::PathBuf;
 
 /// CLI arguments for download and caption generation.
@@ -41,14 +41,14 @@ pub struct DownloadConfig {
 }
 
 impl DownloadConfig {
-    /// Transform to application state (DownloadOptions)
-    pub fn to_options(&self) -> DownloadOptions {
-        let mut opts: DownloadOptions = AudioFormat::Pcm16.into();
+    /// Transform to application state (DownloadParams)
+    pub fn to_params(&self) -> DownloadParams {
+        let mut params: DownloadParams = AudioFormat::Pcm16.into();
         if let Some(dir) = &self.output_dir {
             // SAFETY: AudioFormat::Pcm16 always initializes paths to Some
-            opts.paths = opts.paths.map(|p| p.with_home(dir));
+            params.paths = params.paths.map(|p| p.with_home(dir));
         }
-        opts
+        params
     }
 }
 
@@ -60,10 +60,10 @@ pub async fn download(config: &DownloadConfig, index: &mut ArtifactCache) -> Res
         .ensure_audio(url.clone(), || async move {
             tracing::info!(url = %url, "downloading audio");
 
-            let options = config.to_options();
+            let params = config.to_params();
 
             let (file_path, _info) =
-                melops_dl::dl::download(&url, options).wrap_err("failed to download audio")?;
+                melops_dl::dl::download(&url, params).wrap_err("failed to download audio")?;
 
             let audio_path = file_path.ok_or_eyre("yt-dlp did not return downloaded file path")?;
 
