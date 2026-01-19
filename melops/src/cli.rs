@@ -1,10 +1,9 @@
 //! CLI argument definitions using clap.
 //! CLI argument parsing and command execution.
 
-use crate::cache::CacheCommand;
+use crate::cache::{CacheCommand, CacheStrategy};
 use crate::cap::CapCommand;
 use crate::dl::DlCommand;
-use crate::index::CacheStrategy;
 use crate::web::WebCommand;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use eyre::Result;
@@ -97,6 +96,10 @@ pub struct CaptionArgs {
     #[arg(long)]
     pub preview: bool,
 
+    /// Cache strategy for transcriptions
+    #[arg(long, value_enum, default_value_t = CacheStrategy::default())]
+    pub cache_cap: CacheStrategy,
+
     #[command(flatten)]
     pub chunk_args: ChunkArgs,
 }
@@ -109,28 +112,24 @@ pub struct CacheArgs {
     pub cache_dir: Option<PathBuf>,
 }
 
-/// CLI arguments for index cache operations.
-#[derive(Args, Clone, Copy, Debug, Default)]
-pub struct IndexArgs {
-    /// Cache operation for web page URLs
-    #[arg(long, value_enum, default_value_t = CacheStrategy::GetOrInsert)]
-    pub cache_pages: CacheStrategy,
-
-    /// Cache operation for audio files
-    #[arg(long, value_enum, default_value_t = CacheStrategy::GetOrInsert)]
-    pub cache_audio: CacheStrategy,
-
-    /// Cache operation for SRT files
-    #[arg(long, value_enum, default_value_t = CacheStrategy::GetOrInsert)]
-    pub cache_srt: CacheStrategy,
-}
-
 /// CLI arguments for download configuration.
 #[derive(Args, Clone, Debug, Default)]
 pub struct DownloadArgs {
     /// Output directory for downloaded audio (default: system download directory)
     #[arg(short, long)]
     pub output_dir: Option<PathBuf>,
+
+    /// Cache strategy for downloaded audio files
+    #[arg(long, value_enum, default_value_t = CacheStrategy::default())]
+    pub cache_dl: CacheStrategy,
+}
+
+/// CLI arguments for web scraping.
+#[derive(Args, Clone, Copy, Debug, Default)]
+pub struct WebArgs {
+    /// Cache strategy for scraped page URLs
+    #[arg(long, value_enum, default_value_t = CacheStrategy::default())]
+    pub cache_web: CacheStrategy,
 }
 
 /// Execute CLI command - separated for testing.
@@ -158,8 +157,9 @@ mod tests {
                 path,
                 output: None,
                 cache_args: CacheArgs { cache_dir: None },
+                caption_args: crate::cli::CaptionArgs { cache_cap, .. },
                 ..
-            }) if path.to_str() == Some("audio.wav") => {}
+            }) if path.to_str() == Some("audio.wav") && *cache_cap == CacheStrategy::Auto => {}
             _ => panic!("unexpected command: {:?}", cli.command),
         }
     }
@@ -181,8 +181,11 @@ mod tests {
                 path,
                 output: Some(output),
                 cache_args: CacheArgs { cache_dir: None },
+                caption_args: crate::cli::CaptionArgs { cache_cap, .. },
                 ..
-            }) if path.to_str() == Some("audio.wav") && output.to_str() == Some("output.srt") => {}
+            }) if path.to_str() == Some("audio.wav")
+                && output.to_str() == Some("output.srt")
+                && *cache_cap == CacheStrategy::Auto => {}
             _ => panic!("unexpected command: {:?}", cli.command),
         }
     }
@@ -200,10 +203,14 @@ mod tests {
         match &cli.command {
             Commands::Dl(crate::dl::DlCommand {
                 url,
-                download_args: DownloadArgs { output_dir: None },
+                download_args:
+                    DownloadArgs {
+                        output_dir: None,
+                        cache_dl,
+                    },
                 cache_args: CacheArgs { cache_dir: None },
                 ..
-            }) if url == "https://example.com/video" => {}
+            }) if url == "https://example.com/video" && *cache_dl == CacheStrategy::Auto => {}
             _ => panic!("unexpected command: {:?}", cli.command),
         }
     }
@@ -226,11 +233,13 @@ mod tests {
                 download_args:
                     DownloadArgs {
                         output_dir: Some(output_dir),
+                        cache_dl,
                     },
                 cache_args: CacheArgs { cache_dir: None },
                 ..
             }) if url == "https://example.com/video"
-                && output_dir.to_str() == Some("/tmp/output") => {}
+                && output_dir.to_str() == Some("/tmp/output")
+                && *cache_dl == CacheStrategy::Auto => {}
             _ => panic!("unexpected command: {:?}", cli.command),
         }
     }

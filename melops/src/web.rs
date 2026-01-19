@@ -1,13 +1,12 @@
 //! Web scraping and batch processing command
 
-use crate::cache::CacheDir;
+use crate::cache::{CacheDir, CacheStrategy};
 use crate::cap::{CapConfig, caption};
-use crate::cli::{CacheArgs, CaptionArgs, DownloadArgs, IndexArgs, ModelArgs};
+use crate::cli::{CacheArgs, CaptionArgs, DownloadArgs, ModelArgs, WebArgs};
 use crate::config::ModelConfig;
 use crate::dl::{DownloadConfig, download};
-use crate::index::ArtifactCache;
 use clap::Args;
-use eyre::{Result, eyre};
+use eyre::{Result, WrapErr, eyre};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use std::path::PathBuf;
 
@@ -37,7 +36,7 @@ pub struct WebCommand {
     pub download_args: DownloadArgs,
 
     #[command(flatten)]
-    pub index_args: IndexArgs,
+    pub web_args: WebArgs,
 
     #[command(flatten)]
     pub model_args: ModelArgs,
@@ -76,18 +75,35 @@ async fn fetch_and_extract_urls(page_url: &str) -> Result<Vec<String>> {
     Ok(resolved_urls)
 }
 
-/// Fetch and extract YouTube URLs from page, update index
-async fn fetch_page_urls(page_url: &str, index: &mut ArtifactCache) -> Result<Vec<String>> {
-    let page_url = page_url.to_string();
+/// Fetch and extract YouTube URLs from page using cache
+async fn fetch_page_urls(
+    page_url: &str,
+    cache_dir: &CacheDir,
+    strategy: CacheStrategy,
+) -> Result<Vec<String>> {
+    let dir = cache_dir.pages();
+    let key = page_url;
 
-    // Access URLs from cache or fetch new ones
-    let urls = index
-        .ensure_pages(page_url.clone(), async || {
-            fetch_and_extract_urls(&page_url).await
-        })
-        .await?;
+    let result: Result<Vec<String>> = match strategy {
+        CacheStrategy::Use => {
+            let bytes = cacache::read(&dir, &key).await?;
+            Ok(serde_json::from_slice(&bytes)?)
+        }
+        CacheStrategy::Auto => match cacache::read(&dir, &key).await {
+            Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+            Err(err) => Ok(fetch_and_extract_urls(page_url).await.wrap_err(err)?),
+        },
+        CacheStrategy::Force => Ok(fetch_and_extract_urls(page_url).await?),
+    };
 
-    Ok(urls.clone())
+    let urls = result?;
+
+    if strategy != CacheStrategy::Use {
+        let data = serde_json::to_string(&urls)?;
+        cacache::write(&dir, &key, &data).await?;
+    }
+
+    Ok(urls)
 }
 
 /// Entry point for web command
@@ -101,11 +117,12 @@ pub async fn run(command: WebCommand) -> Result<()> {
     let model_config = ModelConfig::try_from(command.model_args)?;
     let cache_dir: CacheDir = command.cache_args.try_into()?;
 
-    // Load index
-    let mut index = ArtifactCache::load(cache_dir.clone(), command.index_args)?;
+    let cache_web = command.web_args.cache_web;
+    let cache_dl = command.download_args.cache_dl;
+    let cache_cap = command.caption_args.cache_cap;
 
     // Fetch YouTube URLs
-    let youtube_urls = fetch_page_urls(&web_config.page_url, &mut index).await?;
+    let youtube_urls = fetch_page_urls(&web_config.page_url, &cache_dir, cache_web).await?;
 
     // If dry run, output all URLs and exit
     if command.dry_run {
@@ -138,17 +155,19 @@ pub async fn run(command: WebCommand) -> Result<()> {
             output_dir: web_config.output_dir.clone(),
         };
 
-        let audio_path = download(&download_config, &mut index).await?;
+        let audio_paths = download(&download_config, &cache_dir, cache_dl).await?;
 
-        // Generate captions
-        let cap_config = CapConfig {
-            audio_path: audio_path.clone(),
-            output_path: audio_path.with_extension("srt"),
-            preview: command.caption_args.preview,
-            chunk_config: command.caption_args.chunk_args.try_into()?,
-        };
+        // Generate captions for each audio file
+        for audio_path in &audio_paths {
+            let cap_config = CapConfig {
+                audio_path: audio_path.clone(),
+                output_path: audio_path.with_extension("srt"),
+                preview: command.caption_args.preview,
+                chunk_config: command.caption_args.chunk_args.try_into()?,
+            };
 
-        caption(&cap_config, &model, &cache_dir, index.cache_srt).await?;
+            caption(&cap_config, &model, &cache_dir, cache_cap).await?;
+        }
     }
 
     tracing::info!("completed processing all videos");
@@ -169,10 +188,14 @@ mod tests {
             cache_args: CacheArgs { cache_dir: None },
             caption_args: CaptionArgs {
                 preview: false,
+                cache_cap: Default::default(),
                 chunk_args: Default::default(),
             },
-            download_args: DownloadArgs { output_dir: None },
-            index_args: Default::default(),
+            download_args: DownloadArgs {
+                output_dir: None,
+                cache_dl: Default::default(),
+            },
+            web_args: Default::default(),
             model_args: ModelArgs {
                 model_id: "test_model".to_string(),
                 model_source: ModelSource::Auto,

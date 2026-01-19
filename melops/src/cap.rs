@@ -1,9 +1,9 @@
 //! Cap subcommand - generate captions from audio file to SRT.
 
 use crate::cache::CacheDir;
-use crate::cli::{CacheArgs, CaptionArgs, IndexArgs, ModelArgs};
+use crate::cache::CacheStrategy;
+use crate::cli::{CacheArgs, CaptionArgs, ModelArgs};
 use crate::config::ModelConfig;
-use crate::index::CacheStrategy;
 use crate::segment::Segmenter;
 use crate::srt::{display_subtitles, preview_subtitles, to_subtitles};
 use cacache::Integrity;
@@ -33,9 +33,6 @@ pub struct CapCommand {
     pub caption_args: CaptionArgs,
 
     #[command(flatten)]
-    pub index_args: IndexArgs,
-
-    #[command(flatten)]
     pub model_args: ModelArgs,
 }
 
@@ -55,7 +52,7 @@ pub async fn caption(
     cache_dir: &CacheDir,
     strategy: CacheStrategy,
 ) -> Result<()> {
-    let dir = cache_dir.artifact();
+    let dir = cache_dir.transcriptions();
 
     // Load audio
     let audio = read_audio_mono(&config.audio_path).wrap_err("failed to load audio")?;
@@ -63,22 +60,22 @@ pub async fn caption(
     let key = Integrity::from(bytemuck::cast_slice(&audio)).to_string();
 
     let result: Result<Vec<Segment>> = match strategy {
-        CacheStrategy::Get => {
+        CacheStrategy::Use => {
             let bytes = cacache::read(&dir, &key).await?;
             Ok(serde_json::from_slice(&bytes)?)
         }
-        CacheStrategy::GetOrInsert => match cacache::read(&dir, &key).await {
+        CacheStrategy::Auto => match cacache::read(&dir, &key).await {
             Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
             Err(err) => Ok(transcribe(&audio, &config.chunk_config, model)
                 .await
                 .wrap_err(err)?),
         },
-        CacheStrategy::Replace => Ok(transcribe(&audio, &config.chunk_config, model).await?),
+        CacheStrategy::Force => Ok(transcribe(&audio, &config.chunk_config, model).await?),
     };
 
     let segments = result?;
 
-    if strategy != CacheStrategy::Get {
+    if strategy != CacheStrategy::Use {
         let data = serde_json::to_string(&segments)?;
         cacache::write(&dir, &key, &data).await?;
     }
@@ -109,7 +106,7 @@ pub async fn transcribe(
     model: &TdtModel,
 ) -> Result<Vec<Segment>> {
     let segments = model
-        .transcribe_chunked(&audio, chunk_config)
+        .transcribe_chunked(audio, chunk_config)
         .await
         .wrap_err("failed to transcribe")?;
 
@@ -142,7 +139,7 @@ pub async fn run(command: CapCommand) -> Result<()> {
         &cap_config,
         &model,
         &cache_dir,
-        command.index_args.cache_srt,
+        command.caption_args.cache_cap,
     )
     .await
 }

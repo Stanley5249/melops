@@ -1,13 +1,12 @@
 //! Dl subcommand - download and generate captions from audio URL.
 
-use crate::cache::CacheDir;
+use crate::cache::{CacheDir, CacheStrategy};
 use crate::cap::{CapConfig, caption};
-use crate::cli::{CacheArgs, CaptionArgs, DownloadArgs, IndexArgs, ModelArgs};
+use crate::cli::{CacheArgs, CaptionArgs, DownloadArgs, ModelArgs};
 use crate::config::ModelConfig;
-use crate::index::ArtifactCache;
 use clap::Args;
 use color_eyre::Section;
-use eyre::{OptionExt, Result, WrapErr, eyre};
+use eyre::{OptionExt, Result, WrapErr, ensure};
 use melops_dl::asr::AudioFormat;
 use melops_dl::params::DownloadParams;
 use std::path::PathBuf;
@@ -26,9 +25,6 @@ pub struct DlCommand {
 
     #[command(flatten)]
     pub download_args: DownloadArgs,
-
-    #[command(flatten)]
-    pub index_args: IndexArgs,
 
     #[command(flatten)]
     pub model_args: ModelArgs,
@@ -53,41 +49,61 @@ impl DownloadConfig {
     }
 }
 
-/// Download audio from URL and update index
-pub async fn download(config: &DownloadConfig, index: &mut ArtifactCache) -> Result<PathBuf> {
-    let url = config.url.clone();
+/// Download audio from URL
+async fn download_audio(url: &str, params: DownloadParams) -> Result<PathBuf> {
+    let (file_path, _info) =
+        melops_dl::dl::download(url, params).wrap_err("failed to download audio")?;
 
-    let path = index
-        .ensure_audio(url.clone(), async || {
-            tracing::info!(url = %url, "downloading audio");
+    let audio_path = file_path.ok_or_eyre("yt-dlp did not return downloaded file path")?;
 
-            let params = config.to_params();
+    ensure!(
+        audio_path.exists(),
+        "audio file does not exist after download: {}",
+        audio_path.display()
+    );
 
-            let (file_path, _info) =
-                melops_dl::dl::download(&url, params).wrap_err("failed to download audio")?;
+    tracing::info!(file = ?audio_path.display(), "save audio");
 
-            let audio_path = file_path.ok_or_eyre("yt-dlp did not return downloaded file path")?;
+    Ok(audio_path)
+}
 
-            // Verify file exists
-            if !audio_path.exists() {
-                return Err(eyre!(
-                    "audio downloaded but file not found: {:?}",
-                    audio_path.display()
-                ));
+/// Download audio from URL using cache
+pub async fn download(
+    config: &DownloadConfig,
+    cache_dir: &CacheDir,
+    strategy: CacheStrategy,
+) -> Result<Vec<PathBuf>> {
+    let dir = cache_dir.downloads();
+    let key = config.url.as_str();
+
+    let result: Result<Vec<PathBuf>> = match strategy {
+        CacheStrategy::Use => {
+            let bytes = cacache::read(&dir, &key).await?;
+            Ok(serde_json::from_slice(&bytes)?)
+        }
+        CacheStrategy::Auto => match cacache::read(&dir, &key).await {
+            Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+            Err(err) => {
+                let params = config.to_params();
+                let path = download_audio(&config.url, params).await.wrap_err(err)?;
+                Ok(vec![path])
             }
+        },
+        CacheStrategy::Force => {
+            let params = config.to_params();
+            let path = download_audio(&config.url, params).await?;
+            Ok(vec![path])
+        }
+    };
 
-            // Canonicalize path for consistency
-            let audio_path = audio_path
-                .canonicalize()
-                .wrap_err("failed to canonicalize audio path")?;
+    let paths = result?;
 
-            tracing::info!(downloaded = ?audio_path.display(), "audio downloaded");
+    if strategy != CacheStrategy::Use {
+        let data = serde_json::to_string(&paths)?;
+        cacache::write(&dir, &key, &data).await?;
+    }
 
-            Ok(audio_path)
-        })
-        .await?;
-
-    Ok(path.clone())
+    Ok(paths)
 }
 
 /// Entry point for dl command
@@ -101,34 +117,41 @@ pub async fn run(command: DlCommand) -> Result<()> {
     let model_config = ModelConfig::try_from(command.model_args)?;
     let cache_dir: CacheDir = command.cache_args.try_into()?;
 
-    // Load index
-    let mut index = ArtifactCache::load(cache_dir.clone(), command.index_args)?;
-
     // Download
-    let audio_path = download(&download_config, &mut index).await?;
+    let audio_paths =
+        download(&download_config, &cache_dir, command.download_args.cache_dl).await?;
 
-    tracing::info!(
-        downloaded = ?audio_path.display(),
-        "audio downloaded, starting captioning"
-    );
+    let cache_srt = command.caption_args.cache_cap;
 
-    // Create caption config
-    let cap_config = CapConfig {
-        audio_path: audio_path.clone(),
-        output_path: audio_path.with_extension("srt"),
-        preview: command.caption_args.preview,
-        chunk_config: command.caption_args.chunk_args.try_into()?,
-    };
-
-    // Load model and caption
+    // Load model once for all files
     let model = model_config.load()?;
-    caption(&cap_config, &model, &cache_dir, index.cache_srt)
-        .await
-        .with_note(|| {
-            format!(
-                "audio downloaded successfully to: {:?}",
-                audio_path.display()
-            )
-        })
-        .with_suggestion(|| format!("mel cap {:?}", audio_path.display()))
+
+    // Process each audio file
+    for audio_path in &audio_paths {
+        tracing::info!(
+            downloaded = ?audio_path.display(),
+            "audio downloaded, starting captioning"
+        );
+
+        // Create caption config
+        let cap_config = CapConfig {
+            audio_path: audio_path.clone(),
+            output_path: audio_path.with_extension("srt"),
+            preview: command.caption_args.preview,
+            chunk_config: command.caption_args.chunk_args.try_into()?,
+        };
+
+        // Generate captions
+        caption(&cap_config, &model, &cache_dir, cache_srt)
+            .await
+            .with_note(|| {
+                format!(
+                    "audio downloaded successfully to: {:?}",
+                    audio_path.display()
+                )
+            })
+            .with_suggestion(|| format!("mel cap {:?}", audio_path.display()))?;
+    }
+
+    Ok(())
 }

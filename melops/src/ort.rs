@@ -12,7 +12,7 @@ use ort::ep::*;
 /// Initialize ONNX Runtime with execution providers and global configuration
 pub fn init() -> Result<bool> {
     let cache_dir = CacheDir::new(None)?;
-    let _ort_cache = cache_dir.join("ort");
+    let _ort_cache = cache_dir.ort();
 
     let eps = [
         #[cfg(feature = "cuda")]
