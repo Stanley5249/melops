@@ -76,7 +76,11 @@ pub trait AsrModel {
 
     /// Transcribe audio with automatic chunking, returning merged segments.
     #[instrument(skip_all)]
-    async fn transcribe_chunked(&self, audio: &[f32], config: ChunkConfig) -> Result<Vec<Segment>> {
+    async fn transcribe_chunked(
+        &self,
+        audio: &[f32],
+        config: &ChunkConfig,
+    ) -> Result<Vec<Segment>> {
         let chunk_iter = config.chunk_audio(audio.len(), self.sample_rate())?;
         let total = chunk_iter.len();
 

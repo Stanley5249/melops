@@ -1,5 +1,6 @@
 //! Dl subcommand - download and generate captions from audio URL.
 
+use crate::cache::CacheDir;
 use crate::cap::{CapConfig, caption};
 use crate::cli::{CacheArgs, CaptionArgs, DownloadArgs, IndexArgs, ModelArgs};
 use crate::config::ModelConfig;
@@ -98,10 +99,10 @@ pub async fn run(command: DlCommand) -> Result<()> {
     };
 
     let model_config = ModelConfig::try_from(command.model_args)?;
-    let cache_dir = command.cache_args.try_into()?;
+    let cache_dir: CacheDir = command.cache_args.try_into()?;
 
     // Load index
-    let mut index = ArtifactCache::load(cache_dir, command.index_args)?;
+    let mut index = ArtifactCache::load(cache_dir.clone(), command.index_args)?;
 
     // Download
     let audio_path = download(&download_config, &mut index).await?;
@@ -121,7 +122,7 @@ pub async fn run(command: DlCommand) -> Result<()> {
 
     // Load model and caption
     let model = model_config.load()?;
-    caption(&cap_config, &model, &mut index)
+    caption(&cap_config, &model, &cache_dir, index.cache_srt)
         .await
         .with_note(|| {
             format!(

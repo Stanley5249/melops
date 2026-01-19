@@ -11,12 +11,15 @@
 use clap::{Args, Subcommand, ValueEnum};
 use eyre::{OptionExt, Result};
 use std::io::ErrorKind;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use crate::cli::CacheArgs;
 
 /// Index filename
 pub const INDEX_FILENAME: &str = "index.json";
+
+pub const ARTIFACTS_DIR: &str = "artifacts";
 
 /// Models directory name
 pub const MODELS_DIR: &str = "models";
@@ -42,20 +45,11 @@ impl CacheDir {
         Ok(CacheDir(path))
     }
 
-    /// Get the cache directory path
-    #[must_use]
-    pub fn path(&self) -> &Path {
-        &self.0
-    }
-
-    /// Join a path to the cache directory
-    #[must_use]
-    pub fn join(&self, path: impl AsRef<Path>) -> PathBuf {
-        self.0.join(path)
+    pub fn artifact(&self) -> PathBuf {
+        self.0.join(ARTIFACTS_DIR)
     }
 
     /// Get path to a model in the cache
-    #[must_use]
     pub fn model(&self, model_id: &str) -> PathBuf {
         self.0.join(MODELS_DIR).join(model_id)
     }
@@ -66,6 +60,14 @@ impl TryFrom<crate::cli::CacheArgs> for CacheDir {
 
     fn try_from(args: crate::cli::CacheArgs) -> Result<Self> {
         Self::new(args.cache_dir)
+    }
+}
+
+impl Deref for CacheDir {
+    type Target = PathBuf;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -111,10 +113,10 @@ pub fn run(cmd: CacheCommand) -> Result<()> {
 
     match cmd.command {
         CacheSubcommand::Dir => {
-            println!("{}", cache_dir.path().display());
+            println!("{}", cache_dir.display());
             Ok(())
         }
-        CacheSubcommand::Clean { cache_type } => clean(cache_dir.path(), cache_type),
+        CacheSubcommand::Clean { cache_type } => clean(&cache_dir, cache_type),
     }
 }
 

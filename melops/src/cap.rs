@@ -1,16 +1,19 @@
 //! Cap subcommand - generate captions from audio file to SRT.
 
+use crate::cache::CacheDir;
 use crate::cli::{CacheArgs, CaptionArgs, IndexArgs, ModelArgs};
 use crate::config::ModelConfig;
-use crate::index::ArtifactCache;
+use crate::index::CacheStrategy;
 use crate::segment::Segmenter;
 use crate::srt::{display_subtitles, preview_subtitles, to_subtitles};
+use cacache::Integrity;
 use clap::Args;
 use eyre::{Context, Result};
 use melops_asr::audio::read_audio_mono;
 use melops_asr::chunk::ChunkConfig;
 use melops_asr::models::tdt::core::TdtModel;
 use melops_asr::traits::AsrModel;
+use melops_asr::types::Segment;
 use std::path::PathBuf;
 
 /// CLI arguments for caption generation.
@@ -49,60 +52,68 @@ pub struct CapConfig {
 pub async fn caption(
     config: &CapConfig,
     model: &TdtModel,
-    index: &mut ArtifactCache,
+    cache_dir: &CacheDir,
+    strategy: CacheStrategy,
 ) -> Result<()> {
-    // Get cache key
-    let cache_key = config
-        .audio_path
-        .canonicalize()?
-        .to_string_lossy()
-        .into_owned();
+    let dir = cache_dir.artifact();
 
-    // Access SRT path from cache or generate new one
-    let srt_path = index
-        .ensure_srt(cache_key, async || {
-            // Load audio
-            let audio = read_audio_mono(&config.audio_path).wrap_err_with(|| {
-                format!("failed to load audio: {:?}", config.audio_path.display())
-            })?;
+    // Load audio
+    let audio = read_audio_mono(&config.audio_path).wrap_err("failed to load audio")?;
 
-            // Transcribe
-            let segments = model
-                .transcribe_chunked(&audio, config.chunk_config)
+    let key = Integrity::from(bytemuck::cast_slice(&audio)).to_string();
+
+    let result: Result<Vec<Segment>> = match strategy {
+        CacheStrategy::Get => {
+            let bytes = cacache::read(&dir, &key).await?;
+            Ok(serde_json::from_slice(&bytes)?)
+        }
+        CacheStrategy::GetOrInsert => match cacache::read(&dir, &key).await {
+            Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+            Err(err) => Ok(transcribe(&audio, &config.chunk_config, model)
                 .await
-                .wrap_err("transcription failed")?;
+                .wrap_err(err)?),
+        },
+        CacheStrategy::Replace => Ok(transcribe(&audio, &config.chunk_config, model).await?),
+    };
 
-            // Regroup segments for comfortable speed
-            let segments = Segmenter::COMFORTABLE.regroup(&segments);
+    let segments = result?;
 
-            // Convert to subtitles
-            let subtitles = to_subtitles(&segments);
+    if strategy != CacheStrategy::Get {
+        let data = serde_json::to_string(&segments)?;
+        cacache::write(&dir, &key, &data).await?;
+    }
 
-            // Write SRT file
-            tracing::info!(path = ?config.output_path.display(), "write srt file");
+    // Regroup segments for comfortable speed
+    let segments = Segmenter::COMFORTABLE.regroup(&segments);
 
-            std::fs::write(&config.output_path, display_subtitles(&subtitles)).wrap_err_with(
-                || format!("failed to write srt: {:?}", config.output_path.display()),
-            )?;
+    // Convert to subtitles
+    let subtitles = to_subtitles(&segments);
 
-            // Canonicalize output path
-            Ok(config.output_path.canonicalize()?)
-        })
-        .await?;
+    // Write SRT file
+    std::fs::write(&config.output_path, display_subtitles(&subtitles))
+        .wrap_err("failed to save subtitles")?;
+
+    tracing::info!(path = ?config.output_path.display(), "save subtitle");
 
     // Preview if requested
     if config.preview {
-        // Read subtitles from file
-        let content = std::fs::read_to_string(srt_path)
-            .wrap_err_with(|| format!("failed to read srt: {:?}", srt_path.display()))?;
-
-        let subtitles =
-            srtlib::Subtitles::parse_from_str(content).wrap_err("failed to parse srt")?;
-
         print!("{}", preview_subtitles(&subtitles.to_vec(), 2, 2));
     }
 
     Ok(())
+}
+
+pub async fn transcribe(
+    audio: &[f32],
+    chunk_config: &ChunkConfig,
+    model: &TdtModel,
+) -> Result<Vec<Segment>> {
+    let segments = model
+        .transcribe_chunked(&audio, chunk_config)
+        .await
+        .wrap_err("failed to transcribe")?;
+
+    Ok(segments)
 }
 
 /// Entry point for cap command
@@ -123,12 +134,15 @@ pub async fn run(command: CapCommand) -> Result<()> {
         chunk_config: command.caption_args.chunk_args.try_into()?,
     };
 
-    // Load index
-    let mut index = ArtifactCache::load(cache_dir, command.index_args)?;
-
     // Load model
     let model = model_config.load()?;
 
     // Generate captions
-    caption(&cap_config, &model, &mut index).await
+    caption(
+        &cap_config,
+        &model,
+        &cache_dir,
+        command.index_args.cache_srt,
+    )
+    .await
 }

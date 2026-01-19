@@ -3,6 +3,7 @@
 use eyre::{ContextCompat, Result, WrapErr};
 use hf_hub::CacheRepo;
 use hf_hub::api::sync::ApiRepo;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Token with timing information from decoder output.
@@ -29,7 +30,7 @@ impl TokenDuration {
 /// Text segment with timestamps.
 ///
 /// Represents a portion of transcribed text with start and end times in seconds.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Segment {
     /// Transcribed text
     pub text: String,

@@ -1,5 +1,6 @@
 //! Web scraping and batch processing command
 
+use crate::cache::CacheDir;
 use crate::cap::{CapConfig, caption};
 use crate::cli::{CacheArgs, CaptionArgs, DownloadArgs, IndexArgs, ModelArgs};
 use crate::config::ModelConfig;
@@ -98,10 +99,10 @@ pub async fn run(command: WebCommand) -> Result<()> {
     };
 
     let model_config = ModelConfig::try_from(command.model_args)?;
-    let cache_dir = command.cache_args.try_into()?;
+    let cache_dir: CacheDir = command.cache_args.try_into()?;
 
     // Load index
-    let mut index = ArtifactCache::load(cache_dir, command.index_args)?;
+    let mut index = ArtifactCache::load(cache_dir.clone(), command.index_args)?;
 
     // Fetch YouTube URLs
     let youtube_urls = fetch_page_urls(&web_config.page_url, &mut index).await?;
@@ -147,7 +148,7 @@ pub async fn run(command: WebCommand) -> Result<()> {
             chunk_config: command.caption_args.chunk_args.try_into()?,
         };
 
-        caption(&cap_config, &model, &mut index).await?;
+        caption(&cap_config, &model, &cache_dir, index.cache_srt).await?;
     }
 
     tracing::info!("completed processing all videos");

@@ -125,9 +125,9 @@ pub struct IndexData {
 pub struct ArtifactCache {
     data: IndexData,
     path: PathBuf,
-    cache_pages: CacheStrategy,
-    cache_audio: CacheStrategy,
-    cache_srt: CacheStrategy,
+    pub cache_pages: CacheStrategy,
+    pub cache_audio: CacheStrategy,
+    pub cache_srt: CacheStrategy,
 }
 
 impl ArtifactCache {
