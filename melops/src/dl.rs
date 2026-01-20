@@ -11,6 +11,20 @@ use melops_dl::params::DownloadParams;
 use std::path::{Path, PathBuf};
 use tokio::sync::broadcast;
 
+/// Summary of download operations.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DownloadSummary {
+    pub completed: usize,
+    pub failed: usize,
+}
+
+impl DownloadSummary {
+    /// Returns true if all downloads succeeded (no failures).
+    pub fn is_success(&self) -> bool {
+        self.failed == 0
+    }
+}
+
 /// Broadcast channel buffer size for download → caption pipeline.
 ///
 /// Sized to accommodate typical single-file downloads with buffer for processing lag.
@@ -124,7 +138,8 @@ async fn download_and_collect(
             }
             // Stop when download completes
             res = &mut download_task => {
-                res?.wrap_err("failed to download audio")?;
+                res.wrap_err("download task panicked")?
+                    .wrap_err("failed to download audio")?;
                 break;
             }
         }
@@ -184,7 +199,7 @@ pub async fn download(
                 }
             }
             Err(err) => {
-                tracing::info!("no cached audio found, downloading");
+                tracing::info!("cache miss or error, downloading");
                 let paths = download_and_collect(&config.url, params, tx)
                     .await
                     .wrap_err(err)?;
@@ -237,11 +252,11 @@ pub async fn run(command: DlCommand) -> Result<()> {
     // Download with caching (broadcasts paths as they arrive)
     let download_result = download(&download_config, &cache_dir, cache_dl, tx).await;
 
-    // Wait for caption task to complete
-    let caption_summary = caption_task.await??;
-
-    // Propagate errors after both tasks finish
+    // Check download errors first (prerequisite for captions)
     download_result?;
+
+    // Wait for caption task to complete
+    let caption_summary = caption_task.await.wrap_err("caption task panicked")?;
 
     if !caption_summary.is_success() {
         tracing::warn!(

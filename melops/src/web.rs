@@ -4,7 +4,7 @@ use crate::cache::{CacheDir, CacheStrategy};
 use crate::cap::caption_from_channel;
 use crate::cli::{CacheArgs, CaptionArgs, DownloadArgs, ModelArgs, WebArgs};
 use crate::config::ModelConfig;
-use crate::dl::DownloadConfig;
+use crate::dl::{DownloadConfig, DownloadSummary};
 use clap::Args;
 use eyre::{Result, WrapErr, eyre};
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -142,13 +142,18 @@ async fn fetch_page_urls(
 ///
 /// Calls dl::download() for each URL, utilizing the same cache mechanism.
 /// Paths are broadcast through the channel as they arrive.
+/// Continues on error (logs errors, tracks failures).
+///
+/// Constructs and returns summary of download operations.
 async fn download_batch(
     urls: &[String],
     output_dir: &Option<PathBuf>,
     cache_dir: &CacheDir,
     cache_dl: CacheStrategy,
     tx: broadcast::Sender<PathBuf>,
-) -> Result<()> {
+) -> DownloadSummary {
+    let mut summary = DownloadSummary::default();
+
     // Process each URL sequentially
     for (i, url) in urls.iter().enumerate() {
         tracing::info!(
@@ -163,13 +168,18 @@ async fn download_batch(
             output_dir: output_dir.clone(),
         };
 
-        // Use the same download logic as dl command
-        crate::dl::download(&config, cache_dir, cache_dl, tx.clone())
-            .await
-            .wrap_err_with(|| format!("failed to download: {}", url))?;
+        // Use the same download logic as dl command, but continue on error
+        match crate::dl::download(&config, cache_dir, cache_dl, tx.clone()).await {
+            Ok(_) => summary.completed += 1,
+            Err(err) => {
+                // Log error with context (includes cache status if relevant)
+                tracing::error!(url = %url, error = %err, "download failed, continuing");
+                summary.failed += 1;
+            }
+        }
     }
 
-    Ok(())
+    summary
 }
 
 /// Entry point for web command
@@ -223,7 +233,7 @@ pub async fn run(command: WebCommand) -> Result<()> {
     ));
 
     // Download with caching (broadcasts paths as they arrive)
-    let download_result = download_batch(
+    let download_summary = download_batch(
         &youtube_urls[..count],
         &web_config.output_dir,
         &cache_dir,
@@ -233,21 +243,22 @@ pub async fn run(command: WebCommand) -> Result<()> {
     .await;
 
     // Wait for caption task to complete
-    let caption_summary = caption_task.await??;
+    let caption_summary = caption_task.await.wrap_err("caption task panicked")?;
 
-    // Propagate errors after both tasks finish
-    download_result?;
-
-    if caption_summary.is_success() {
+    // Report final status
+    if download_summary.is_success() && caption_summary.is_success() {
         tracing::info!(
-            completed = caption_summary.completed,
+            download.completed = download_summary.completed,
+            caption.completed = caption_summary.completed,
             "completed processing all videos"
         );
     } else {
         tracing::warn!(
-            completed = caption_summary.completed,
-            failed = caption_summary.failed,
-            "completed processing with some caption failures"
+            download.completed = download_summary.completed,
+            download.failed = download_summary.failed,
+            caption.completed = caption_summary.completed,
+            caption.failed = caption_summary.failed,
+            "completed processing with some failures"
         );
     }
 

@@ -104,7 +104,7 @@ pub async fn caption(
     let segments = result?;
 
     if strategy != CacheStrategy::Use {
-        write_cache(&dir, &key, &segments).await;
+        write_cache(dir, &key, &segments).await;
     }
 
     // Regroup segments for comfortable speed
@@ -141,7 +141,7 @@ pub async fn transcribe(
 }
 
 /// Summary of caption generation from channel.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct CaptionSummary {
     pub completed: usize,
     pub failed: usize,
@@ -167,9 +167,8 @@ pub async fn caption_from_channel(
     cache_cap: CacheStrategy,
     chunk_config: ChunkConfig,
     preview: bool,
-) -> Result<CaptionSummary> {
-    let mut completed = 0;
-    let mut failed = 0;
+) -> CaptionSummary {
+    let mut summary = CaptionSummary::default();
 
     while let Ok(audio_path) = rx.recv().await {
         let cap_config = CapConfig {
@@ -180,19 +179,15 @@ pub async fn caption_from_channel(
         };
 
         match caption(&cap_config, &model, &cache_dir, cache_cap).await {
-            Ok(_) => completed += 1,
+            Ok(_) => summary.completed += 1,
             Err(e) => {
                 tracing::warn!(path = ?audio_path.display(), error = %e, "caption failed");
-                failed += 1;
+                summary.failed += 1;
             }
         }
     }
 
-    if failed > 0 {
-        tracing::warn!(completed, failed, "caption finished with errors");
-    }
-
-    Ok(CaptionSummary { completed, failed })
+    summary
 }
 
 /// Entry point for cap command
