@@ -13,37 +13,22 @@ use pyo3::prelude::*;
 ///
 /// Subset of fields from `YoutubeDL.sanitize_info()`. Full dict available via JSON.
 ///
-/// **Note**: Only `id` and `title` are guaranteed. All other fields may be `None` depending on:
-/// - Content type (video vs playlist vs channel vs live stream)
-/// - Extractor capabilities (different platforms provide different metadata)
-/// - Content availability (deleted videos, private videos, etc.)
+/// **Design Decision**: Only `id` is kept as a required field because:
+/// - Even `title` is not guaranteed (some extractors or deleted/private videos may not provide it)
+/// - All other fields depend on content type, extractor capabilities, and availability
+/// - Keeping minimal struct reduces parsing failures and complexity
+/// - Users can access full metadata via the `.info.json` file if needed
+///
+/// Fields like `title`, `extractor_key`, `uploader`, etc. can be accessed from the
+/// `.info.json` file that yt-dlp generates alongside the downloaded media.
 ///
 /// See: <https://github.com/yt-dlp/yt-dlp#output-template>
 #[derive(Clone, Debug, FromPyObject)]
 #[pyo3(from_item_all)]
 pub struct DownloadInfo {
-    /// Video ID (platform-specific, required)
+    /// Video ID (platform-specific).
+    ///
+    /// This is the only guaranteed field across all extractors and content types.
+    /// Used for file naming and identifying the downloaded content.
     pub id: String,
-    /// Video title (required)
-    pub title: String,
-    /// Extractor name (e.g., `Youtube`, `Vimeo`)
-    pub extractor_key: Option<String>,
-    /// Uploader full name
-    pub uploader: Option<String>,
-    /// Uploader username or channel ID
-    pub uploader_id: Option<String>,
-    /// Duration in seconds
-    pub duration: Option<f64>,
-    /// Video webpage URL
-    pub webpage_url: Option<String>,
-    /// Video description text
-    pub description: Option<String>,
-    /// Upload date in UTC (`YYYYMMDD`)
-    pub upload_date: Option<String>,
-    /// View count
-    pub view_count: Option<i64>,
-    /// Number of likes
-    pub like_count: Option<i64>,
-    /// Age restriction (`0` = none)
-    pub age_limit: Option<i64>,
 }

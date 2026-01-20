@@ -9,7 +9,7 @@
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let (tx, _rx) = broadcast::channel(10);
 //! let info = download("https://youtube.com/watch?v=example", AudioFormat::Pcm16.into(), tx)?;
-//! println!("Downloaded '{}'", info.title);
+//! println!("Downloaded video with ID: {}", info.id);
 //! # Ok(())
 //! # }
 //! ```

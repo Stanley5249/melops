@@ -5,8 +5,8 @@
 //!
 //! Uses "Me at the zoo" (jNQXAC9IVRw) - predictable metadata.
 
-use eyre::{Context, OptionExt, Result, ensure};
-use melops_dl::asr::{ASR_OUTPUT_TEMPLATE, AudioFormat};
+use eyre::{ensure, Context, OptionExt, Result};
+use melops_dl::asr::{AudioFormat, ASR_OUTPUT_TEMPLATE};
 use melops_dl::dl::download;
 use melops_dl::info::DownloadInfo;
 use melops_dl::params::{DownloadParams, OutputPaths, OutputTemplates};
@@ -19,10 +19,7 @@ use tokio::sync::broadcast;
 const DOWNLOAD_PATH_CHANNEL_SIZE: usize = 10;
 
 const TEST_URL: &str = "https://youtu.be/jNQXAC9IVRw";
-const TEST_EXTRACTOR: &str = "Youtube";
-const TEST_UPLOADER: &str = "jawed";
 const TEST_ID: &str = "jNQXAC9IVRw";
-const TEST_TITLE: &str = "Me at the zoo";
 const TEST_REL_PATH: &str = "Youtube/jawed/jNQXAC9IVRw/Me_at_the_zoo.wav";
 
 struct TestContext {
@@ -148,17 +145,12 @@ fn wav_format() {
 fn info_dict_fields() {
     let ctx = get_test_context();
 
-    match &ctx.info {
-        DownloadInfo {
-            id,
-            title,
-            extractor_key: Some(extractor_key),
-            uploader: Some(uploader),
-            ..
-        } if id == TEST_ID
-            && title == TEST_TITLE
-            && extractor_key == TEST_EXTRACTOR
-            && uploader == TEST_UPLOADER => {}
-        _ => panic!(),
-    }
+    // Only `id` is guaranteed to be present in DownloadInfo.
+    // Other fields (title, extractor_key, uploader, etc.) can be accessed
+    // from the .info.json file if needed.
+    assert_eq!(
+        ctx.info.id, TEST_ID,
+        "expected video ID to be {TEST_ID}, got {}",
+        ctx.info.id
+    );
 }
