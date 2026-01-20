@@ -1696,6 +1696,7 @@ dependencies = [
  "eyre",
  "hound",
  "pyo3",
+ "tokio",
 ]
 
 [[package]]

@@ -13,6 +13,10 @@ use melops_dl::params::{DownloadParams, OutputPaths, OutputTemplates};
 use std::fs::{create_dir_all, remove_dir_all};
 use std::path::PathBuf;
 use std::sync::LazyLock;
+use tokio::sync::broadcast;
+
+/// Broadcast channel buffer size for test downloads.
+const DOWNLOAD_PATH_CHANNEL_SIZE: usize = 10;
 
 const TEST_URL: &str = "https://youtu.be/jNQXAC9IVRw";
 const TEST_EXTRACTOR: &str = "Youtube";
@@ -33,8 +37,17 @@ static TEST_CONTEXT: LazyLock<Result<TestContext>> = LazyLock::new(|| {
     preset.paths = Some(OutputPaths::simple(&temp_dir, &temp_dir));
     preset.outtmpl = Some(OutputTemplates::simple(ASR_OUTPUT_TEMPLATE.to_string()));
 
-    let (audio_paths, info) =
-        download(TEST_URL, preset).context("yt-dlp download failed for ASR Pcm16 preset")?;
+    // Create broadcast channel for receiving file paths
+    let (tx, mut rx) = broadcast::channel(DOWNLOAD_PATH_CHANNEL_SIZE);
+
+    let info =
+        download(TEST_URL, preset, tx).context("yt-dlp download failed for ASR Pcm16 preset")?;
+
+    // Collect file paths from broadcast channel (blocking receive in sync context)
+    let mut audio_paths = Vec::new();
+    while let Ok(path) = rx.try_recv() {
+        audio_paths.push(path);
+    }
 
     // Validate file_path was returned and exists
     let file_path = audio_paths

@@ -1,17 +1,24 @@
 //! Web scraping and batch processing command
 
 use crate::cache::{CacheDir, CacheStrategy};
-use crate::cap::{CapConfig, caption};
+use crate::cap::caption_from_channel;
 use crate::cli::{CacheArgs, CaptionArgs, DownloadArgs, ModelArgs, WebArgs};
 use crate::config::ModelConfig;
-use crate::dl::{DownloadConfig, download};
+use crate::dl::DownloadConfig;
 use clap::Args;
 use eyre::{Result, WrapErr, eyre};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use std::path::{Path, PathBuf};
+use tokio::sync::broadcast;
 
 /// Maximum concurrent URL resolution requests
 const MAX_CONCURRENT_RESOLVES: usize = 64;
+
+/// Broadcast channel buffer size for download → caption pipeline.
+///
+/// Sized to accommodate typical single-file downloads with buffer for processing lag.
+/// If downloads produce multiple files quickly, a larger buffer prevents blocking.
+const DOWNLOAD_PATH_CHANNEL_SIZE: usize = 10;
 
 #[derive(Args, Debug)]
 pub struct WebCommand {
@@ -43,7 +50,7 @@ pub struct WebCommand {
 }
 
 /// Validated configuration for web scraping operations
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct WebConfig {
     pub page_url: String,
     pub output_dir: Option<PathBuf>,
@@ -75,7 +82,7 @@ async fn fetch_and_extract_urls(page_url: &str) -> Result<Vec<String>> {
     Ok(resolved_urls)
 }
 
-async fn write_cache(dir: &Path, key: &str, urls: &[String]) {
+async fn write_page_cache(dir: &Path, key: &str, urls: &[String]) {
     tracing::debug!("writing page urls to cache");
 
     let data = match serde_json::to_string(urls) {
@@ -125,10 +132,44 @@ async fn fetch_page_urls(
     let urls = result?;
 
     if strategy != CacheStrategy::Use {
-        write_cache(&dir, key, &urls).await;
+        write_page_cache(dir, key, &urls).await;
     }
 
     Ok(urls)
+}
+
+/// Download audio files from URLs sequentially using cache
+///
+/// Calls dl::download() for each URL, utilizing the same cache mechanism.
+/// Paths are broadcast through the channel as they arrive.
+async fn download_batch(
+    urls: &[String],
+    output_dir: &Option<PathBuf>,
+    cache_dir: &CacheDir,
+    cache_dl: CacheStrategy,
+    tx: broadcast::Sender<PathBuf>,
+) -> Result<()> {
+    // Process each URL sequentially
+    for (i, url) in urls.iter().enumerate() {
+        tracing::info!(
+            current = i + 1,
+            total = urls.len(),
+            url = %url,
+            "downloading video"
+        );
+
+        let config = DownloadConfig {
+            url: url.clone(),
+            output_dir: output_dir.clone(),
+        };
+
+        // Use the same download logic as dl command
+        crate::dl::download(&config, cache_dir, cache_dl, tx.clone())
+            .await
+            .wrap_err_with(|| format!("failed to download: {}", url))?;
+    }
+
+    Ok(())
 }
 
 /// Entry point for web command
@@ -162,40 +203,54 @@ pub async fn run(command: WebCommand) -> Result<()> {
 
     tracing::info!(count, "processing youtube urls");
 
+    // Fast-fail: validate chunk config before expensive operations
+    let chunk_config = command.caption_args.chunk_args.try_into()?;
+
     // Load model once for all videos
     let model = model_config.load()?;
 
-    // Process each video
-    for (i, youtube_url) in youtube_urls.iter().take(count).enumerate() {
+    // Create broadcast channel for download → caption pipeline
+    let (tx, rx) = broadcast::channel::<PathBuf>(DOWNLOAD_PATH_CHANNEL_SIZE);
+
+    // Spawn caption worker (using shared abstraction)
+    let caption_task = tokio::spawn(caption_from_channel(
+        rx,
+        model,
+        cache_dir.clone(),
+        cache_cap,
+        chunk_config,
+        command.caption_args.preview,
+    ));
+
+    // Download with caching (broadcasts paths as they arrive)
+    let download_result = download_batch(
+        &youtube_urls[..count],
+        &web_config.output_dir,
+        &cache_dir,
+        cache_dl,
+        tx,
+    )
+    .await;
+
+    // Wait for caption task to complete
+    let caption_summary = caption_task.await??;
+
+    // Propagate errors after both tasks finish
+    download_result?;
+
+    if caption_summary.is_success() {
         tracing::info!(
-            current = i + 1,
-            total = count,
-            url = %youtube_url,
-            "processing video"
+            completed = caption_summary.completed,
+            "completed processing all videos"
         );
-
-        // Download audio
-        let download_config = DownloadConfig {
-            url: youtube_url.clone(),
-            output_dir: web_config.output_dir.clone(),
-        };
-
-        let audio_paths = download(&download_config, &cache_dir, cache_dl).await?;
-
-        // Generate captions for each audio file
-        for audio_path in &audio_paths {
-            let cap_config = CapConfig {
-                audio_path: audio_path.clone(),
-                output_path: audio_path.with_extension("srt"),
-                preview: command.caption_args.preview,
-                chunk_config: command.caption_args.chunk_args.try_into()?,
-            };
-
-            caption(&cap_config, &model, &cache_dir, cache_cap).await?;
-        }
+    } else {
+        tracing::warn!(
+            completed = caption_summary.completed,
+            failed = caption_summary.failed,
+            "completed processing with some caption failures"
+        );
     }
 
-    tracing::info!("completed processing all videos");
     Ok(())
 }
 

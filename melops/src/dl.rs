@@ -1,15 +1,21 @@
 //! Dl subcommand - download and generate captions from audio URL.
 
 use crate::cache::{CacheDir, CacheStrategy};
-use crate::cap::{CapConfig, caption};
+use crate::cap::caption_from_channel;
 use crate::cli::{CacheArgs, CaptionArgs, DownloadArgs, ModelArgs};
 use crate::config::ModelConfig;
 use clap::Args;
-use color_eyre::Section;
-use eyre::{Result, WrapErr, ensure};
+use eyre::{Result, WrapErr};
 use melops_dl::asr::AudioFormat;
 use melops_dl::params::DownloadParams;
 use std::path::{Path, PathBuf};
+use tokio::sync::broadcast;
+
+/// Broadcast channel buffer size for download → caption pipeline.
+///
+/// Sized to accommodate typical single-file downloads with buffer for processing lag.
+/// If downloads produce multiple files quickly, a larger buffer prevents blocking.
+const DOWNLOAD_PATH_CHANNEL_SIZE: usize = 10;
 
 /// CLI arguments for download and caption generation.
 #[derive(Args, Debug)]
@@ -31,7 +37,7 @@ pub struct DlCommand {
 }
 
 /// Validated download configuration.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DownloadConfig {
     pub url: String,
     pub output_dir: Option<PathBuf>,
@@ -49,19 +55,8 @@ impl DownloadConfig {
     }
 }
 
-/// Download audio from URL
-async fn download_audio(config: &DownloadConfig) -> Result<Vec<PathBuf>> {
-    let (audio_path, _info) = melops_dl::dl::download(&config.url, config.to_params())
-        .wrap_err("failed to download audio")?;
-
-    ensure!(!audio_path.is_empty(), "no audio files were downloaded",);
-
-    tracing::info!(count = audio_path.len(), "save audio");
-
-    Ok(audio_path)
-}
-
-fn validate_cache(paths: &[PathBuf]) -> bool {
+/// Validate that all cached paths still exist on disk
+pub fn validate_cache(paths: &[PathBuf]) -> bool {
     if paths.is_empty() {
         tracing::debug!("cache contains no paths");
         return false;
@@ -99,50 +94,98 @@ async fn write_cache(dir: &Path, key: &str, paths: &[PathBuf]) {
     }
 }
 
+/// Download audio and collect paths synchronously in blocking task
+///
+/// Creates internal subscription for collection, spawns blocking download,
+/// collects all paths during download (paths broadcast to caption worker simultaneously).
+async fn download_and_collect(
+    url: &str,
+    params: DownloadParams,
+    broadcast_tx: broadcast::Sender<PathBuf>,
+) -> Result<Vec<PathBuf>> {
+    // Subscribe to broadcast channel for collection
+    let mut collect_rx = broadcast_tx.subscribe();
+
+    // Spawn blocking download task (sends to broadcast)
+    let download_task = tokio::task::spawn_blocking({
+        let url = url.to_string();
+        move || melops_dl::dl::download(&url, params, broadcast_tx)
+    });
+
+    // Wait for download to complete (closes broadcast)
+    let _info = download_task.await?.wrap_err("failed to download audio")?;
+
+    // Collect all paths that were broadcast
+    let mut paths = Vec::new();
+    while let Ok(path) = collect_rx.recv().await {
+        paths.push(path);
+    }
+
+    Ok(paths)
+}
+
 /// Download audio from URL using cache
+///
+/// Paths are broadcast through the channel as they arrive (for caption worker),
+/// and also collected for caching purposes.
 pub async fn download(
     config: &DownloadConfig,
     cache_dir: &CacheDir,
     strategy: CacheStrategy,
-) -> Result<Vec<PathBuf>> {
+    tx: broadcast::Sender<PathBuf>,
+) -> Result<()> {
     let dir = cache_dir.downloads();
     let key = config.url.as_str();
+    let params = config.to_params();
 
-    let result: Result<Vec<PathBuf>> = match strategy {
+    match strategy {
         CacheStrategy::Use => {
             tracing::debug!("reading audio paths from cache");
-            Ok(serde_json::from_slice(&cacache::read(&dir, &key).await?)?)
+            let bytes = cacache::read(&dir, &key).await?;
+            let paths: Vec<PathBuf> = serde_json::from_slice(&bytes)?;
+
+            // Broadcast cached paths
+            for path in &paths {
+                if tx.send(path.clone()).is_err() {
+                    tracing::warn!(path = ?path.display(), "failed to broadcast cached path (no receivers)");
+                }
+            }
         }
+
         CacheStrategy::Auto => match cacache::read(&dir, &key).await {
             Ok(bytes) => {
                 let paths: Vec<PathBuf> = serde_json::from_slice(&bytes)?;
 
                 if validate_cache(&paths) {
                     tracing::info!("using cached audio files");
-                    Ok(paths)
+                    for path in &paths {
+                        if tx.send(path.clone()).is_err() {
+                            tracing::warn!(path = ?path.display(), "failed to broadcast cached path (no receivers)");
+                        }
+                    }
                 } else {
-                    tracing::info!("cached files invalidated, downloading again");
-                    Ok(download_audio(&config).await?)
+                    tracing::info!("cached files invalidated, downloading");
+                    let paths = download_and_collect(&config.url, params, tx).await?;
+                    write_cache(dir, key, &paths).await;
                 }
             }
             Err(err) => {
                 tracing::info!("no cached audio found, downloading");
-                Ok(download_audio(&config).await.wrap_err(err)?)
+                let paths = download_and_collect(&config.url, params, tx)
+                    .await
+                    .wrap_err(err)?;
+                write_cache(dir, key, &paths).await;
             }
         },
+
         CacheStrategy::Force => {
             tracing::info!("forcing download, ignoring cache");
-            Ok(download_audio(&config).await?)
+            let paths = download_and_collect(&config.url, params, tx).await?;
+            write_cache(dir, key, &paths).await;
         }
-    };
-
-    let paths = result?;
-
-    if strategy != CacheStrategy::Use {
-        write_cache(&dir, key, &paths).await;
     }
 
-    Ok(paths)
+    Ok(())
 }
 
 /// Entry point for dl command
@@ -155,12 +198,8 @@ pub async fn run(command: DlCommand) -> Result<()> {
 
     let model_config = ModelConfig::try_from(command.model_args)?;
     let cache_dir: CacheDir = command.cache_args.try_into()?;
-
-    // Download
-    let audio_paths =
-        download(&download_config, &cache_dir, command.download_args.cache_dl).await?;
-
     let cache_srt = command.caption_args.cache_cap;
+    let cache_dl = command.download_args.cache_dl;
 
     // Fast failing: validate chunk config before expensive operations
     let chunk_config = command.caption_args.chunk_args.try_into()?;
@@ -168,26 +207,34 @@ pub async fn run(command: DlCommand) -> Result<()> {
     // Load model once for all files
     let model = model_config.load()?;
 
-    // Process each audio file
-    for audio_path in &audio_paths {
-        // Create caption config
-        let cap_config = CapConfig {
-            audio_path: audio_path.clone(),
-            output_path: audio_path.with_extension("srt"),
-            preview: command.caption_args.preview,
-            chunk_config,
-        };
+    // Create broadcast channel for download → caption pipeline
+    let (tx, rx) = broadcast::channel::<PathBuf>(DOWNLOAD_PATH_CHANNEL_SIZE);
 
-        // Generate captions
-        caption(&cap_config, &model, &cache_dir, cache_srt)
-            .await
-            .with_note(|| {
-                format!(
-                    "audio downloaded successfully to: {:?}",
-                    audio_path.display()
-                )
-            })
-            .with_suggestion(|| format!("mel cap {:?}", audio_path.display()))?;
+    // Spawn caption worker (using shared abstraction)
+    let caption_task = tokio::spawn(caption_from_channel(
+        rx,
+        model,
+        cache_dir.clone(),
+        cache_srt,
+        chunk_config,
+        command.caption_args.preview,
+    ));
+
+    // Download with caching (broadcasts paths as they arrive)
+    let download_result = download(&download_config, &cache_dir, cache_dl, tx).await;
+
+    // Wait for caption task to complete
+    let caption_summary = caption_task.await??;
+
+    // Propagate errors after both tasks finish
+    download_result?;
+
+    if !caption_summary.is_success() {
+        tracing::warn!(
+            completed = caption_summary.completed,
+            failed = caption_summary.failed,
+            "captioning completed with some failures"
+        );
     }
 
     Ok(())

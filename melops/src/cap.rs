@@ -16,6 +16,7 @@ use melops_asr::traits::AsrModel;
 use melops_asr::types::Segment;
 use std::path::Path;
 use std::path::PathBuf;
+use tokio::sync::broadcast;
 
 /// CLI arguments for caption generation.
 #[derive(Args, Debug)]
@@ -137,6 +138,61 @@ pub async fn transcribe(
         .wrap_err("failed to transcribe")?;
 
     Ok(segments)
+}
+
+/// Summary of caption generation from channel.
+#[derive(Debug)]
+pub struct CaptionSummary {
+    pub completed: usize,
+    pub failed: usize,
+}
+
+impl CaptionSummary {
+    /// Returns true if all captions succeeded (no failures).
+    pub fn is_success(&self) -> bool {
+        self.failed == 0
+    }
+}
+
+/// Caption audio files from channel with sequential processing.
+///
+/// Receives audio paths from channel and generates captions sequentially.
+/// Continues on error (logs warnings, counts failures).
+///
+/// Returns summary when channel closes (sender dropped).
+pub async fn caption_from_channel(
+    mut rx: broadcast::Receiver<PathBuf>,
+    model: TdtModel,
+    cache_dir: CacheDir,
+    cache_cap: CacheStrategy,
+    chunk_config: ChunkConfig,
+    preview: bool,
+) -> Result<CaptionSummary> {
+    let mut completed = 0;
+    let mut failed = 0;
+
+    while let Ok(audio_path) = rx.recv().await {
+        let cap_config = CapConfig {
+            audio_path: audio_path.clone(),
+            output_path: audio_path.with_extension("srt"),
+            preview,
+            chunk_config,
+        };
+
+        match caption(&cap_config, &model, &cache_dir, cache_cap).await {
+            Ok(_) => completed += 1,
+            Err(e) => {
+                tracing::warn!(path = ?audio_path.display(), error = %e, "caption failed");
+                failed += 1;
+            }
+        }
+    }
+
+    if failed > 0 {
+        tracing::warn!(completed, failed, "caption finished with errors");
+    }
+
+    Ok(CaptionSummary { completed, failed })
 }
 
 /// Entry point for cap command

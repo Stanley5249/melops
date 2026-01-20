@@ -12,9 +12,11 @@
 //! **ASR preset** (16kHz mono WAV):
 //! ```no_run
 //! use melops_dl::{dl::download, asr::AudioFormat};
+//! use tokio::sync::broadcast;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let (_file_path, info) = download("https://youtube.com/watch?v=example", AudioFormat::Pcm16.into())?;
+//! let (tx, _rx) = broadcast::channel(10);
+//! let info = download("https://youtube.com/watch?v=example", AudioFormat::Pcm16.into(), tx)?;
 //! println!("Downloaded: {}", info.title);
 //! # Ok(())
 //! # }
@@ -25,6 +27,7 @@
 //! use melops_dl::dl::download;
 //! use melops_dl::params::{DownloadParams, OutputPaths, OutputTemplates, PostProcessor};
 //! use std::collections::HashMap;
+//! use tokio::sync::broadcast;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let mut templates = HashMap::new();
@@ -43,8 +46,9 @@
 //!     ..Default::default()
 //! };
 //!
-//! let (file_path, info) = download("https://youtube.com/watch?v=example", params)?;
-//! println!("Downloaded '{}' to {:?}", info.title, file_path);
+//! let (tx, _rx) = broadcast::channel(10);
+//! let info = download("https://youtube.com/watch?v=example", params, tx)?;
+//! println!("Downloaded '{}'", info.title);
 //! # Ok(())
 //! # }
 //! ```

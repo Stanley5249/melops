@@ -13,6 +13,7 @@ default = []
 
 [dependencies]
 dirs.workspace = true
+tokio = { workspace = true, features = ["sync"] }
 
 pyo3 = { version = "0.27.2", features = ["auto-initialize"] }
 
