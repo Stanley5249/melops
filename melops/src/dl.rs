@@ -107,17 +107,31 @@ async fn download_and_collect(
     let mut collect_rx = broadcast_tx.subscribe();
 
     // Spawn blocking download task (sends to broadcast)
-    let download_task = tokio::task::spawn_blocking({
+    let mut download_task = tokio::task::spawn_blocking({
         let url = url.to_string();
         move || melops_dl::dl::download(&url, params, broadcast_tx)
     });
 
-    // Wait for download to complete (closes broadcast)
-    let _info = download_task.await?.wrap_err("failed to download audio")?;
-
-    // Collect all paths that were broadcast
+    // Collect paths while download is running
     let mut paths = Vec::new();
-    while let Ok(path) = collect_rx.recv().await {
+    loop {
+        tokio::select! {
+            // Keep collecting paths as they arrive
+            val = collect_rx.recv() => {
+                if let Ok(path) = val {
+                    paths.push(path);
+                }
+            }
+            // Stop when download completes
+            res = &mut download_task => {
+                res?.wrap_err("failed to download audio")?;
+                break;
+            }
+        }
+    }
+
+    // Collect any remaining paths after download completes
+    while let Ok(path) = collect_rx.try_recv() {
         paths.push(path);
     }
 
