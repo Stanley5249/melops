@@ -15,7 +15,7 @@ use tokio::sync::broadcast;
 ///
 /// Sized to accommodate typical single-file downloads with buffer for processing lag.
 /// If downloads produce multiple files quickly, a larger buffer prevents blocking.
-const DOWNLOAD_PATH_CHANNEL_SIZE: usize = 10;
+const DOWNLOAD_PATH_CHANNEL_SIZE: usize = 128;
 
 /// CLI arguments for download and caption generation.
 #[derive(Args, Debug)]
@@ -160,8 +160,8 @@ pub async fn download(
 
             // Broadcast cached paths
             for path in &paths {
-                if tx.send(path.clone()).is_err() {
-                    tracing::warn!(path = ?path.display(), "failed to broadcast cached path (no receivers)");
+                if let Err(err) = tx.send(path.clone()) {
+                    tracing::warn!(%err, "failed to broadcast cached path");
                 }
             }
         }
@@ -173,8 +173,8 @@ pub async fn download(
                 if validate_cache(&paths) {
                     tracing::info!("using cached audio files");
                     for path in &paths {
-                        if tx.send(path.clone()).is_err() {
-                            tracing::warn!(path = ?path.display(), "failed to broadcast cached path (no receivers)");
+                        if let Err(err) = tx.send(path.clone()) {
+                            tracing::warn!(%err, "failed to broadcast cached path");
                         }
                     }
                 } else {

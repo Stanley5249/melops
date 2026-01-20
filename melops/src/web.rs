@@ -18,7 +18,7 @@ const MAX_CONCURRENT_RESOLVES: usize = 64;
 ///
 /// Sized to accommodate typical single-file downloads with buffer for processing lag.
 /// If downloads produce multiple files quickly, a larger buffer prevents blocking.
-const DOWNLOAD_PATH_CHANNEL_SIZE: usize = 10;
+const DOWNLOAD_PATH_CHANNEL_SIZE: usize = 128;
 
 #[derive(Args, Debug)]
 pub struct WebCommand {
