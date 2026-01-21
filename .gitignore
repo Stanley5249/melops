@@ -23,5 +23,6 @@ __pycache__/
 *.wav
 *.srt
 
-# Project cache
-.cache/
+# AI
+.claude/
+CLAUDE.md
