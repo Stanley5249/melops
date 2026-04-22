@@ -6,14 +6,14 @@ use crate::cli::{CacheArgs, CaptionArgs, ModelArgs};
 use crate::config::ModelConfig;
 use crate::segment::Segmenter;
 use crate::srt::{display_subtitles, preview_subtitles, to_subtitles};
-use cacache::Integrity;
 use clap::Args;
+use eyre::OptionExt;
 use eyre::{Context, Result};
-use melops_asr::audio::read_audio_mono;
-use melops_asr::chunk::ChunkConfig;
 use melops_asr::models::tdt::core::TdtModel;
 use melops_asr::traits::AsrModel;
 use melops_asr::types::Segment;
+use melops_audio::ffmpeg::Ffmpeg;
+use melops_audio::segment::SegmentConfig;
 use std::path::Path;
 use std::path::PathBuf;
 use tokio::sync::broadcast;
@@ -21,7 +21,7 @@ use tokio::sync::broadcast;
 /// CLI arguments for caption generation.
 #[derive(Args, Debug)]
 pub struct CapCommand {
-    /// Path to input WAV file
+    /// Path to audio file (any format supported by ffmpeg: wav, mp3, m4a, mkv, …)
     pub path: PathBuf,
 
     /// Output SRT path (default: same as input with .srt extension)
@@ -44,7 +44,7 @@ pub struct CapConfig {
     pub audio_path: PathBuf,
     pub output_path: PathBuf,
     pub preview: bool,
-    pub chunk_config: ChunkConfig,
+    pub segment_config: SegmentConfig,
 }
 
 async fn write_cache(dir: &Path, key: &str, segments: &[Segment]) {
@@ -72,10 +72,15 @@ pub async fn caption(
 ) -> Result<()> {
     let dir = cache_dir.transcriptions();
 
-    // Load audio
-    let audio = read_audio_mono(&config.audio_path).wrap_err("failed to load audio")?;
+    let mut ffmpeg = Ffmpeg::new(config.audio_path.clone())
+        .await
+        .wrap_err("failed to initialize ffmpeg")?;
 
-    let key = Integrity::from(bytemuck::cast_slice(&audio)).to_string();
+    let key = ffmpeg.path.to_string_lossy().into_owned();
+
+    let reader = ffmpeg
+        .reader()
+        .ok_or_eyre("ffmpeg stdout is not available")?;
 
     let result: Result<Vec<Segment>> = match strategy {
         CacheStrategy::Use => {
@@ -88,16 +93,22 @@ pub async fn caption(
                 tracing::info!("using cached transcription");
                 Ok(serde_json::from_slice(&bytes)?)
             }
-            Err(err) => {
+            Err(e) => {
                 tracing::info!("no cached transcription found, transcribing");
-                Ok(transcribe(&audio, &config.chunk_config, model)
+                Ok(model
+                    .transcribe(reader, config.segment_config)
                     .await
-                    .wrap_err(err)?)
+                    .wrap_err("failed to transcribe")
+                    .wrap_err(e)?)
             }
         },
         CacheStrategy::Force => {
             tracing::info!("forcing transcription, ignoring cache");
-            Ok(transcribe(&audio, &config.chunk_config, model).await?)
+
+            Ok(model
+                .transcribe(reader, config.segment_config)
+                .await
+                .wrap_err("failed to transcribe")?)
         }
     };
 
@@ -127,19 +138,6 @@ pub async fn caption(
     Ok(())
 }
 
-pub async fn transcribe(
-    audio: &[f32],
-    chunk_config: &ChunkConfig,
-    model: &TdtModel,
-) -> Result<Vec<Segment>> {
-    let segments = model
-        .transcribe_chunked(audio, chunk_config)
-        .await
-        .wrap_err("failed to transcribe")?;
-
-    Ok(segments)
-}
-
 /// Summary of caption generation from channel.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CaptionSummary {
@@ -165,7 +163,7 @@ pub async fn caption_from_channel(
     model: TdtModel,
     cache_dir: CacheDir,
     cache_cap: CacheStrategy,
-    chunk_config: ChunkConfig,
+    segment_config: SegmentConfig,
     preview: bool,
 ) -> CaptionSummary {
     let mut summary = CaptionSummary::default();
@@ -175,7 +173,7 @@ pub async fn caption_from_channel(
             audio_path: audio_path.clone(),
             output_path: audio_path.with_extension("srt"),
             preview,
-            chunk_config,
+            segment_config,
         };
 
         match caption(&cap_config, &model, &cache_dir, cache_cap).await {
@@ -205,7 +203,7 @@ pub async fn run(command: CapCommand) -> Result<()> {
         audio_path,
         output_path,
         preview: command.caption_args.preview,
-        chunk_config: command.caption_args.chunk_args.try_into()?,
+        segment_config: command.caption_args.segment_args.try_into()?,
     };
 
     // Load model

@@ -1,0 +1,16 @@
+[package]
+name = "melops-audio"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Audio processing utilities for Melops"
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+futures.workspace = true
+tokio = { workspace = true, features = ["process", "io-util"] }
+
+async-stream = "0.3"
+thiserror = "2"
+tracing = "0.1"

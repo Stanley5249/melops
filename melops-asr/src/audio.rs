@@ -1,13 +1,7 @@
-//! Audio loading and preprocessing utilities.
+//! Audio preprocessing utilities.
 
-use crate::error::{AudioError, Result};
-use hound::{SampleFormat, WavReader, WavSpec};
 use ndarray::prelude::*;
 use std::f32::consts::PI;
-use std::path::Path;
-
-/// Expected sample rate for ASR models (16kHz)
-pub const SAMPLE_RATE: u32 = 16000;
 
 /// Mel-spectrogram feature extractor.
 ///
@@ -23,7 +17,7 @@ pub struct MelSpectrogram {
 }
 
 impl MelSpectrogram {
-    /// Apply mel-spectrogram extraction to audio samples.
+    /// Extract mel-spectrogram features from a 16 kHz mono f32 slice.
     ///
     /// # Arguments
     ///
@@ -57,63 +51,6 @@ impl MelSpectrogram {
     pub fn mel_frames_to_samples(&self, mel_frames: usize) -> usize {
         mel_frames * self.hop_length
     }
-}
-
-/// Load audio from a WAV file.
-///
-/// Returns audio samples and WAV specification.
-///
-/// # Errors
-///
-/// Returns error if file cannot be read or has unsupported format.
-pub fn load_audio<P: AsRef<Path>>(path: P) -> Result<(Vec<f32>, WavSpec)> {
-    let mut reader = WavReader::open(path)?;
-    let spec = reader.spec();
-
-    let samples: Vec<f32> = match spec.sample_format {
-        SampleFormat::Float => reader.samples::<f32>().collect::<hound::Result<_>>()?,
-        SampleFormat::Int => reader
-            .samples::<i16>()
-            .map(|s| s.map(|s| s as f32 / i16::MAX as f32))
-            .collect::<hound::Result<_>>()?,
-    };
-
-    Ok((samples, spec))
-}
-
-/// Load audio from a WAV file as mono f32 samples at 16kHz.
-///
-/// Validates sample rate is 16kHz and converts stereo to mono if needed.
-///
-/// # Errors
-///
-/// Returns error if:
-/// - File cannot be read
-/// - Sample rate is not 16kHz
-/// - Channel count is invalid (0 or > 2)
-pub fn read_audio_mono(path: impl AsRef<Path>) -> Result<Vec<f32>> {
-    let (mut audio, spec) = load_audio(path)?;
-
-    if spec.sample_rate != SAMPLE_RATE {
-        return Err(AudioError::InvalidSampleRate {
-            expected: SAMPLE_RATE,
-            got: spec.sample_rate,
-        }
-        .into());
-    }
-
-    if spec.channels == 0 || spec.channels > 2 {
-        return Err(AudioError::InvalidChannels(spec.channels).into());
-    }
-
-    if spec.channels == 2 {
-        audio = audio
-            .chunks(2)
-            .map(|chunk| chunk.iter().sum::<f32>() / 2.0)
-            .collect();
-    }
-
-    Ok(audio)
 }
 
 /// Apply preemphasis filter to audio signal.
@@ -260,97 +197,4 @@ fn mel_spectrogram(audio: &[f32], config: &MelSpectrogram) -> Array2<f32> {
     }
 
     mel_spectrogram
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use hound::WavWriter;
-
-    fn create_test_wav(
-        path: &Path,
-        sample_rate: u32,
-        channels: u16,
-        samples: &[f32],
-    ) -> hound::Result<()> {
-        let spec = hound::WavSpec {
-            channels,
-            sample_rate,
-            bits_per_sample: 16,
-            sample_format: SampleFormat::Int,
-        };
-        let mut writer = WavWriter::create(path, spec)?;
-        for &sample in samples {
-            writer.write_sample((sample * 32768.0) as i16)?;
-        }
-        writer.finalize()?;
-        Ok(())
-    }
-
-    #[test]
-    fn reads_mono_16khz() {
-        let temp_dir = std::env::temp_dir();
-        let path = temp_dir.join("test_mono.wav");
-
-        let test_samples = vec![0.1, 0.2, 0.3];
-        create_test_wav(&path, 16000, 1, &test_samples).unwrap();
-
-        let result = read_audio_mono(&path).unwrap();
-
-        for (expected, actual) in test_samples.iter().zip(result.iter()) {
-            assert!((expected - actual).abs() < 0.01);
-        }
-
-        std::fs::remove_file(path).ok();
-    }
-
-    #[test]
-    fn converts_stereo_to_mono() {
-        let temp_dir = std::env::temp_dir();
-        let path = temp_dir.join("test_stereo.wav");
-
-        let test_samples = vec![0.2, 0.4, 0.6, 0.8];
-        create_test_wav(&path, 16000, 2, &test_samples).unwrap();
-
-        let result = read_audio_mono(&path).unwrap();
-
-        assert_eq!(result.len(), 2);
-        assert!((result[0] - 0.3).abs() < 0.01);
-        assert!((result[1] - 0.7).abs() < 0.01);
-        std::fs::remove_file(path).ok();
-    }
-
-    #[test]
-    fn rejects_wrong_sample_rate() {
-        let temp_dir = std::env::temp_dir();
-        let path = temp_dir.join("test_44khz.wav");
-
-        create_test_wav(&path, 44100, 1, &[0.0, 0.1]).unwrap();
-
-        let result = read_audio_mono(&path);
-
-        assert!(result.is_err());
-        if let Err(e) = result {
-            assert!(matches!(e, crate::error::Error::Audio(_)));
-        }
-
-        std::fs::remove_file(path).ok();
-    }
-
-    #[test]
-    fn rejects_invalid_channels() {
-        let temp_dir = std::env::temp_dir();
-        let path = temp_dir.join("test_surround.wav");
-
-        create_test_wav(&path, 16000, 6, &[0.0; 12]).unwrap();
-
-        let result = read_audio_mono(&path);
-
-        assert!(result.is_err());
-        if let Err(e) = result {
-            assert!(matches!(e, crate::error::Error::Audio(_)));
-        }
-
-        std::fs::remove_file(path).ok();
-    }
 }

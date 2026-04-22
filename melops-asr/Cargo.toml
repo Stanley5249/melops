@@ -10,9 +10,9 @@ keywords = ["asr", "parakeet", "onnx", "speech-to-text", "nvidia"]
 categories = ["multimedia::audio", "science"]
 
 [dependencies]
+melops-audio.workspace = true
 eyre.workspace = true
 hf-hub.workspace = true
-hound.workspace = true
 ndarray.workspace = true
 ort = { workspace = true, features = ["std", "ndarray", "tracing"] }
 serde.workspace = true

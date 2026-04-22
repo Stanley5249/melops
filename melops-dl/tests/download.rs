@@ -5,8 +5,8 @@
 //!
 //! Uses "Me at the zoo" (jNQXAC9IVRw) - predictable metadata.
 
-use eyre::{ensure, Context, OptionExt, Result};
-use melops_dl::asr::{AudioFormat, ASR_OUTPUT_TEMPLATE};
+use eyre::{Context, OptionExt, Result, ensure};
+use melops_dl::asr::{ASR_OUTPUT_TEMPLATE, AudioFormat};
 use melops_dl::dl::download;
 use melops_dl::info::DownloadInfo;
 use melops_dl::params::{DownloadParams, OutputPaths, OutputTemplates};

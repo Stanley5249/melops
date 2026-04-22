@@ -1,11 +1,10 @@
 //! Core traits for ASR pipeline components.
 
-use crate::chunk::ChunkConfig;
 use crate::error::Result;
 use crate::merge::merge_chunks;
 use crate::types::{Segment, TokenDuration};
-use futures::stream::{self, StreamExt, TryStreamExt};
-use std::ops::Range;
+use futures::stream::TryStreamExt;
+use melops_audio::segment::{SegmentConfig, SegmentStream};
 use tracing::instrument;
 
 /// ASR model that performs inference on preprocessed features.
@@ -44,19 +43,11 @@ pub trait AsrModel {
     /// Run inference on the given audio, returning a sequence of tokens with timing.
     async fn forward(&self, audio: &[f32]) -> Result<Vec<TokenDuration>>;
 
-    /// Run inference on a chunk of audio with offset, returning model outputs.
-    async fn forward_chunk(
-        &self,
-        audio: &[f32],
-        range: Range<usize>,
-    ) -> Result<Vec<TokenDuration>> {
-        let frames = self.samples_to_frames(range.start);
+    /// Run inference on a chunk with absolute sample-offset adjustment.
+    async fn forward_chunk(&self, samples: &[f32], offset: usize) -> Result<Vec<TokenDuration>> {
+        let frames = self.samples_to_frames(offset);
 
-        let chunk = &audio[range];
-
-        let mut output = self.forward(chunk).await?;
-
-        // Inline offset_outputs: adjust frame indices by offset
+        let mut output = self.forward(samples).await?;
         for token in &mut output {
             token.frame_index += frames;
         }
@@ -67,51 +58,39 @@ pub trait AsrModel {
     /// Convert a sequence of model outputs to text segments with timestamps.
     fn to_segments(&self, output: &[TokenDuration]) -> Result<Vec<Segment>>;
 
-    /// Transcribe audio samples, returning segments.
+    /// Transcribe audio from any chunk source, returning merged segments.
     #[instrument(skip_all)]
-    async fn transcribe(&self, audio: &[f32]) -> Result<Vec<Segment>> {
-        let output = self.forward(audio).await?;
-        self.to_segments(&output)
-    }
-
-    /// Transcribe audio with automatic chunking, returning merged segments.
-    #[instrument(skip_all)]
-    async fn transcribe_chunked(
+    async fn transcribe<T: SegmentStream>(
         &self,
-        audio: &[f32],
-        config: &ChunkConfig,
+        mut stream: T,
+        config: SegmentConfig,
     ) -> Result<Vec<Segment>> {
-        let chunk_iter = config.chunk_audio(audio.len(), self.sample_rate())?;
-        let total = chunk_iter.len();
+        let mut stream = std::pin::pin!(stream.stream(config));
 
-        let chunks = chunk_iter
-            .zip(1..)
-            .map(|(range, i)| {
-                tracing::info!(
-                    progress=%format!("{}/{}", i, total),
-                    range = %format!(
-                        "{:.1}-{:.1}s",
-                        self.samples_to_secs(range.start),
-                        self.samples_to_secs(range.end)
-                    )
-                );
-                range
-            })
-            .map(|range| self.forward_chunk(audio, range));
+        let mut chunks: Vec<Vec<TokenDuration>> = Vec::new();
+        let mut offset = 0;
+        let mut i = 1usize;
 
-        let chunks: Vec<_> = stream::iter(chunks).buffered(2).try_collect().await?;
+        while let Some(segment) = stream.try_next().await? {
+            tracing::info!(
+                segment = i,
+                range = %format!(
+                    "{:.1}-{:.1}s",
+                    self.samples_to_secs(offset),
+                    self.samples_to_secs(offset + segment.len())
+                ),
+            );
 
-        let merged_output = merge_chunks(chunks);
-        self.to_segments(&merged_output)
-    }
+            let output = self.forward_chunk(&segment, offset).await?;
 
-    /// Transcribe audio from an iterator stream, returning merged segments.
-    #[allow(unused_variables)]
-    async fn transcribe_stream(
-        &self,
-        audio: impl Iterator<Item = f32>,
-        config: ChunkConfig,
-    ) -> Result<Vec<Segment>> {
-        todo!()
+            offset += config.step_size();
+            i += 1;
+
+            chunks.push(output);
+        }
+
+        let merged = merge_chunks(chunks);
+
+        self.to_segments(&merged)
     }
 }

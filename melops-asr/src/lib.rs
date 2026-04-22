@@ -32,7 +32,6 @@
 //! ```
 
 pub mod audio;
-pub mod chunk;
 pub mod error;
 pub mod merge;
 pub mod models;

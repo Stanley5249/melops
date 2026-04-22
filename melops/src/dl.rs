@@ -231,7 +231,7 @@ pub async fn run(command: DlCommand) -> Result<()> {
     let cache_dl = command.download_args.cache_dl;
 
     // Fast failing: validate chunk config before expensive operations
-    let chunk_config = command.caption_args.chunk_args.try_into()?;
+    let segment_config = command.caption_args.segment_args.try_into()?;
 
     // Load model once for all files
     let model = model_config.load()?;
@@ -245,7 +245,7 @@ pub async fn run(command: DlCommand) -> Result<()> {
         model,
         cache_dir.clone(),
         cache_srt,
-        chunk_config,
+        segment_config,
         command.caption_args.preview,
     ));
 

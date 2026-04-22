@@ -18,8 +18,8 @@ dirs.workspace = true
 eyre.workspace = true
 futures.workspace = true
 hf-hub.workspace = true
-hound.workspace = true
 melops-asr.workspace = true
+melops-audio.workspace = true
 melops-dl.workspace = true
 melops-web.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

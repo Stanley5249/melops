@@ -214,7 +214,7 @@ pub async fn run(command: WebCommand) -> Result<()> {
     tracing::info!(count, "processing youtube urls");
 
     // Fast-fail: validate chunk config before expensive operations
-    let chunk_config = command.caption_args.chunk_args.try_into()?;
+    let segment_config = command.caption_args.segment_args.try_into()?;
 
     // Load model once for all videos
     let model = model_config.load()?;
@@ -228,7 +228,7 @@ pub async fn run(command: WebCommand) -> Result<()> {
         model,
         cache_dir.clone(),
         cache_cap,
-        chunk_config,
+        segment_config,
         command.caption_args.preview,
     ));
 
@@ -280,7 +280,7 @@ mod tests {
             caption_args: CaptionArgs {
                 preview: false,
                 cache_cap: Default::default(),
-                chunk_args: Default::default(),
+                segment_args: Default::default(),
             },
             download_args: DownloadArgs {
                 output_dir: None,

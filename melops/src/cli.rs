@@ -7,7 +7,7 @@ use crate::dl::DlCommand;
 use crate::web::WebCommand;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use eyre::Result;
-use melops_asr::chunk::{ChunkConfig, DEFAULT_CHUNK_DURATION, DEFAULT_CHUNK_OVERLAP};
+use melops_audio::segment::{DEFAULT_DURATION, DEFAULT_OVERLAP, SegmentConfig};
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -60,32 +60,23 @@ pub struct ModelArgs {
     pub model_source: ModelSource,
 }
 
-/// CLI arguments for chunk configuration.
+/// CLI arguments for audio segment configuration.
 #[derive(Args, Clone, Copy, Debug, Default)]
-pub struct ChunkArgs {
-    /// Chunk duration in seconds for long audio
-    #[arg(long, default_value_t = DEFAULT_CHUNK_DURATION)]
+pub struct SegmentArgs {
+    /// Segment duration in seconds
+    #[arg(long, default_value_t = DEFAULT_DURATION)]
     pub duration: f32,
 
-    /// Chunk overlap in seconds
-    #[arg(long, default_value_t = DEFAULT_CHUNK_OVERLAP)]
+    /// Overlap in seconds kept between consecutive segments
+    #[arg(long, default_value_t = DEFAULT_OVERLAP)]
     pub overlap: f32,
 }
 
-impl TryFrom<ChunkArgs> for ChunkConfig {
-    type Error = melops_asr::error::Error;
+impl TryFrom<SegmentArgs> for SegmentConfig {
+    type Error = melops_audio::segment::SegmentConfigError;
 
-    fn try_from(args: ChunkArgs) -> Result<Self, Self::Error> {
-        ChunkConfig::new(args.duration, args.overlap)
-    }
-}
-
-impl From<ChunkConfig> for ChunkArgs {
-    fn from(config: ChunkConfig) -> Self {
-        ChunkArgs {
-            duration: config.duration(),
-            overlap: config.overlap(),
-        }
+    fn try_from(args: SegmentArgs) -> Result<Self, Self::Error> {
+        SegmentConfig::from_secs(args.duration, args.overlap)
     }
 }
 
@@ -101,7 +92,7 @@ pub struct CaptionArgs {
     pub cache_cap: CacheStrategy,
 
     #[command(flatten)]
-    pub chunk_args: ChunkArgs,
+    pub segment_args: SegmentArgs,
 }
 
 /// CLI arguments for cache directory configuration.
