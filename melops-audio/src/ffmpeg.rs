@@ -9,8 +9,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
 use tokio::process::{Child, Command};
 
 pub struct Ffmpeg {
-    pub path: PathBuf,
-    pub child: Child,
+    path: PathBuf,
+    child: Child,
 }
 
 impl Ffmpeg {
@@ -41,6 +41,23 @@ impl Ffmpeg {
 
     pub async fn join(&mut self) -> std::io::Result<ExitStatus> {
         self.child.wait().await
+    }
+
+    /// Stable cache key: path + file size + mtime to detect replaced files.
+    pub fn cache_key(&self) -> String {
+        let path = self.path.to_string_lossy();
+        if let Ok(meta) = std::fs::metadata(&self.path) {
+            let size = meta.len();
+            let mtime = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            format!("{path}:{size}:{mtime}")
+        } else {
+            path.into_owned()
+        }
     }
 }
 

@@ -76,7 +76,7 @@ pub async fn caption(
         .await
         .wrap_err("failed to initialize ffmpeg")?;
 
-    let key = ffmpeg.path.to_string_lossy().into_owned();
+    let key = ffmpeg.cache_key();
 
     let reader = ffmpeg
         .reader()
