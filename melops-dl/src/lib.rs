@@ -5,18 +5,17 @@
 //! - [`dl`] - Download function (main entry point)
 //! - [`params`] - yt-dlp download parameters and configuration
 //! - [`info`] - Metadata output types from yt-dlp
-//! - [`asr`] - ASR presets for 16kHz mono audio extraction
 //!
 //! ## Quick Start
 //!
-//! **ASR preset** (16kHz mono WAV):
+//! **ASR preset** (best audio, native format):
 //! ```no_run
-//! use melops_dl::{dl::download, asr::AudioFormat};
+//! use melops_dl::{dl::download, params::DownloadParams};
 //! use tokio::sync::broadcast;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let (tx, _rx) = broadcast::channel(10);
-//! let info = download("https://youtube.com/watch?v=example", AudioFormat::Pcm16.into(), tx)?;
+//! let info = download("https://youtube.com/watch?v=example", DownloadParams::asr(), tx)?;
 //! println!("Downloaded: {}", info.title);
 //! # Ok(())
 //! # }
@@ -53,7 +52,6 @@
 //! # }
 //! ```
 
-pub mod asr;
 pub mod dl;
 pub mod info;
 pub mod params;

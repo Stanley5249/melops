@@ -89,6 +89,9 @@ pub struct PostProcessorArgs {
     pub ffmpeg: Vec<String>,
 }
 
+/// Output template for ASR downloads: `<Extractor>/<uploader>/<id>/<title>.<ext>`
+pub const ASR_OUTPUT_TEMPLATE: &str = "%(extractor_key)s/%(uploader)s/%(id)s/%(title)s.%(ext)s";
+
 /// yt-dlp download configuration passed to `YoutubeDL(params)`.
 ///
 /// Maps to Python dict for `YoutubeDL` constructor. Use `cli_to_api.py` to convert CLI flags.
@@ -118,6 +121,20 @@ pub struct DownloadParams {
     pub no_warnings: Option<bool>,
     /// Keep video file after post-processing (prevents deletion of original file)
     pub keepvideo: Option<bool>,
+}
+
+impl DownloadParams {
+    /// ASR preset: best audio in native format, organized by extractor/uploader/id.
+    pub fn asr() -> Self {
+        Self {
+            format: Some("ba".to_string()),
+            paths: Some(OutputPaths::system_default()),
+            outtmpl: Some(OutputTemplates::simple(ASR_OUTPUT_TEMPLATE.to_string())),
+            writeinfojson: Some(true),
+            restrictfilenames: Some(true),
+            ..Default::default()
+        }
+    }
 }
 
 #[cfg(test)]

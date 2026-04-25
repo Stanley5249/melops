@@ -1,14 +1,11 @@
 //! yt-dlp download function and Python API wrapper.
 //!
-//! Main entry point for downloading media via yt-dlp.
-//!
 //! ```no_run
-//! use melops_dl::dl::download;
-//! use melops_dl::asr::AudioFormat;
+//! use melops_dl::{dl::download, params::DownloadParams};
 //! use tokio::sync::broadcast;
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let (tx, _rx) = broadcast::channel(10);
-//! let info = download("https://youtube.com/watch?v=example", AudioFormat::Pcm16.into(), tx)?;
+//! let info = download("https://youtube.com/watch?v=example", DownloadParams::asr(), tx)?;
 //! println!("Downloaded video with ID: {}", info.id);
 //! # Ok(())
 //! # }
@@ -37,11 +34,11 @@ use tokio::sync::broadcast;
 /// # Example
 ///
 /// ```no_run
-/// use melops_dl::{dl::download, asr::AudioFormat};
+/// use melops_dl::{dl::download, params::DownloadParams};
 /// use tokio::sync::broadcast;
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let (tx, mut rx) = broadcast::channel(10);
-/// let info = download("https://youtube.com/watch?v=BaW_jenozKc", AudioFormat::Pcm16.into(), tx)?;
+/// let info = download("https://youtube.com/watch?v=BaW_jenozKc", DownloadParams::asr(), tx)?;
 ///
 /// // Paths are broadcast as each file completes
 /// while let Ok(path) = rx.blocking_recv() {

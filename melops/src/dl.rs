@@ -6,7 +6,6 @@ use crate::cli::{CacheArgs, CaptionArgs, DownloadArgs, ModelArgs};
 use crate::config::ModelConfig;
 use clap::Args;
 use eyre::{Result, WrapErr};
-use melops_dl::asr::AudioFormat;
 use melops_dl::params::DownloadParams;
 use std::path::{Path, PathBuf};
 use tokio::sync::broadcast;
@@ -60,9 +59,8 @@ pub struct DownloadConfig {
 impl DownloadConfig {
     /// Transform to application state (DownloadParams)
     pub fn to_params(&self) -> DownloadParams {
-        let mut params: DownloadParams = AudioFormat::Pcm16.into();
+        let mut params = DownloadParams::asr();
         if let Some(dir) = &self.output_dir {
-            // SAFETY: AudioFormat::Pcm16 always initializes paths to Some
             params.paths = params.paths.map(|p| p.with_home(dir));
         }
         params

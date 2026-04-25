@@ -1,15 +1,13 @@
 //! ASR preset download integration tests.
 //!
-//! Tests: YouTube download, WAV format (16kHz mono 16-bit PCM via hound),
-//! path grouping (Extractor/uploader/id).
+//! Tests: YouTube download, path grouping (Extractor/uploader/id).
 //!
 //! Uses "Me at the zoo" (jNQXAC9IVRw) - predictable metadata.
 
 use eyre::{Context, OptionExt, Result, ensure};
-use melops_dl::asr::{ASR_OUTPUT_TEMPLATE, AudioFormat};
 use melops_dl::dl::download;
 use melops_dl::info::DownloadInfo;
-use melops_dl::params::{DownloadParams, OutputPaths, OutputTemplates};
+use melops_dl::params::{ASR_OUTPUT_TEMPLATE, DownloadParams, OutputPaths, OutputTemplates};
 use std::fs::{create_dir_all, remove_dir_all};
 use std::path::PathBuf;
 use std::sync::LazyLock;
@@ -20,7 +18,7 @@ const DOWNLOAD_PATH_CHANNEL_SIZE: usize = 10;
 
 const TEST_URL: &str = "https://youtu.be/jNQXAC9IVRw";
 const TEST_ID: &str = "jNQXAC9IVRw";
-const TEST_REL_PATH: &str = "Youtube/jawed/jNQXAC9IVRw/Me_at_the_zoo.wav";
+const TEST_REL_DIR: &str = "Youtube/jawed/jNQXAC9IVRw";
 
 struct TestContext {
     file_path: PathBuf,
@@ -30,15 +28,13 @@ struct TestContext {
 static TEST_CONTEXT: LazyLock<Result<TestContext>> = LazyLock::new(|| {
     let temp_dir = create_temp_dir();
 
-    let mut preset: DownloadParams = AudioFormat::Pcm16.into();
+    let mut preset = DownloadParams::asr();
     preset.paths = Some(OutputPaths::simple(&temp_dir, &temp_dir));
     preset.outtmpl = Some(OutputTemplates::simple(ASR_OUTPUT_TEMPLATE.to_string()));
 
-    // Create broadcast channel for receiving file paths
     let (tx, mut rx) = broadcast::channel(DOWNLOAD_PATH_CHANNEL_SIZE);
 
-    let info =
-        download(TEST_URL, preset, tx).context("yt-dlp download failed for ASR Pcm16 preset")?;
+    let info = download(TEST_URL, preset, tx).context("yt-dlp download failed for ASR preset")?;
 
     // Collect file paths from broadcast channel (blocking receive in sync context)
     let mut audio_paths = Vec::new();
@@ -46,7 +42,6 @@ static TEST_CONTEXT: LazyLock<Result<TestContext>> = LazyLock::new(|| {
         audio_paths.push(path);
     }
 
-    // Validate file_path was returned and exists
     let file_path = audio_paths
         .first()
         .ok_or_eyre("download did not return any file paths")?
@@ -66,7 +61,6 @@ fn create_temp_dir() -> PathBuf {
     temp_dir.push("melops");
     temp_dir.push("test");
 
-    // Clean up previous test run
     if temp_dir.exists() {
         remove_dir_all(&temp_dir).ok();
     }
@@ -83,19 +77,19 @@ fn get_test_context() -> &'static TestContext {
 
 #[test]
 #[ignore = "network I/O"]
-fn wav_file_exist() {
+fn audio_file_exists() {
     let ctx = get_test_context();
 
     assert!(
         ctx.file_path.exists(),
-        "WAV file not found: {:?}",
+        "audio file not found: {:?}",
         ctx.file_path.display()
     );
 }
 
 #[test]
 #[ignore = "network I/O"]
-fn info_file_exist() {
+fn info_file_exists() {
     let ctx = get_test_context();
     let info_file = ctx.file_path.with_extension("info.json");
 
@@ -110,33 +104,12 @@ fn info_file_exist() {
 #[ignore = "network I/O"]
 fn path_structure() {
     let ctx = get_test_context();
+    let parent = ctx.file_path.parent().expect("file has no parent");
 
     assert!(
-        ctx.file_path.ends_with(TEST_REL_PATH),
-        "expected path to end with {TEST_REL_PATH}, got {:?}",
+        parent.ends_with(TEST_REL_DIR),
+        "expected path under {TEST_REL_DIR}, got {:?}",
         ctx.file_path.display()
-    );
-}
-
-#[test]
-#[ignore = "network I/O"]
-fn wav_format() {
-    let ctx = get_test_context();
-
-    let reader = hound::WavReader::open(&ctx.file_path).expect("failed to open WAV file");
-    let spec = reader.spec();
-
-    assert!(
-        matches!(
-            spec,
-            hound::WavSpec {
-                channels: 1,
-                sample_rate: 16000,
-                bits_per_sample: 16,
-                sample_format: hound::SampleFormat::Int,
-            }
-        ),
-        "unexpected WAV format: {spec:?}, expected 16kHz mono 16-bit PCM"
     );
 }
 
@@ -145,9 +118,8 @@ fn wav_format() {
 fn info_dict_fields() {
     let ctx = get_test_context();
 
-    // Only `id` is guaranteed to be present in DownloadInfo.
-    // Other fields (title, extractor_key, uploader, etc.) can be accessed
-    // from the .info.json file if needed.
+    // Only `id` is guaranteed stable in DownloadInfo; other fields (title, uploader, etc.)
+    // can vary by extractor version and are available in the .info.json file.
     assert_eq!(
         ctx.info.id, TEST_ID,
         "expected video ID to be {TEST_ID}, got {}",
