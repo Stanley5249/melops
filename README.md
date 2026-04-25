@@ -12,7 +12,9 @@ This project is organized as a Cargo workspace:
 
 - `melops/` - CLI tool for audio captioning and speech-to-text
 - `melops-asr/` - ASR library with chunking support for long audio
+- `melops-audio/` - FFmpeg-backed audio decoding and chunking
 - `melops-dl/` - Audio download utility using yt-dlp
+- `melops-web/` - Web scraping utilities (YouTube URL extraction)
 - `melops-export/` - Model export tool (NeMo to ONNX)
 
 ## Quick Start
