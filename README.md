@@ -1,4 +1,4 @@
-# Melops 🦜
+# 🦜 Melops 
 
 Fast audio captioning and speech-to-text toolkit with NVIDIA's Parakeet models via ONNX Runtime.
 
